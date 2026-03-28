@@ -1,0 +1,22 @@
+# Dependencies
+frontend/node_modules/
+frontend/.next/
+__pycache__/
+*.pyc
+
+# Environment
+.env
+.env.local
+frontend/.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploads/results
+backend/static/uploads/
+backend/static/results/
