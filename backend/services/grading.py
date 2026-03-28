@@ -45,9 +45,16 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     if image is None:
         raise ValueError("画像のデコードに失敗しました")
 
+    # 高解像度画像をリサイズして処理速度を改善（長辺1200px上限）
+    image = _resize_if_needed(image, max_side=1200)
+
     # 1. 前処理: カード領域検出
     card_data = detect_card(image)
     card_image = card_data["card_image"]
+
+    # カード画像も処理用にリサイズ（長辺800px上限）
+    card_image = _resize_if_needed(card_image, max_side=800)
+    card_data["card_image"] = card_image
 
     # 2. 各分析を実行
     centering_result = analyze_centering(card_image)
@@ -150,7 +157,18 @@ def _calculate_confidence(card_data: dict, sub_scores: dict) -> float:
     return min(max(confidence, 0.1), 1.0)
 
 
+def _resize_if_needed(image: np.ndarray, max_side: int = 1200) -> np.ndarray:
+    """長辺がmax_sideを超える場合にリサイズ"""
+    h, w = image.shape[:2]
+    if max(h, w) <= max_side:
+        return image
+    scale = max_side / max(h, w)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
 def _image_to_base64(image: np.ndarray) -> str:
     """OpenCV画像をBase64文字列に変換"""
-    _, buffer = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    _, buffer = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 75])
     return base64.b64encode(buffer).decode("utf-8")

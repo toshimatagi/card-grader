@@ -37,10 +37,24 @@ export async function gradeCard(
   formData.append("front_image", frontImage);
   formData.append("card_type", cardType);
 
-  const res = await fetch(`${API_BASE}/api/v1/grade`, {
-    method: "POST",
-    body: formData,
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000); // 120秒タイムアウト
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/v1/grade`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    clearTimeout(timeout);
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error("鑑定処理がタイムアウトしました。もう一度お試しください。");
+    }
+    throw new Error("サーバーに接続できませんでした。しばらく待ってからお試しください。");
+  }
+  clearTimeout(timeout);
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: "鑑定処理に失敗しました" }));
