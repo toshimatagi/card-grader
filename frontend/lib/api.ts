@@ -29,16 +29,43 @@ export interface HistoryItem {
   created_at: string;
 }
 
+export interface Rarity {
+  id: string;
+  name_ja: string;
+  name_en: string;
+  has_border: boolean;
+  border_type: string;
+  surface_type: string;
+}
+
+export interface Brand {
+  id: string;
+  name_ja: string;
+  name_en: string;
+  size: string;
+  rarities: Rarity[];
+}
+
+export async function getBrands(): Promise<Brand[]> {
+  const res = await fetch(`${API_BASE}/api/v1/brands`);
+  if (!res.ok) throw new Error("ブランド情報の取得に失敗しました");
+  return res.json();
+}
+
 export async function gradeCard(
   frontImage: File,
-  cardType: string = "standard"
+  cardType: string = "standard",
+  brand: string = "",
+  rarity: string = ""
 ): Promise<GradeResult> {
   const formData = new FormData();
   formData.append("front_image", frontImage);
   formData.append("card_type", cardType);
+  formData.append("brand", brand);
+  formData.append("rarity", rarity);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120000); // 120秒タイムアウト
+  const timeout = setTimeout(() => controller.abort(), 120000);
 
   let res: Response;
   try {

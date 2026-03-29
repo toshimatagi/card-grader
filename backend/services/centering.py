@@ -10,13 +10,15 @@ import cv2
 import numpy as np
 
 
-def analyze_centering(card_image: np.ndarray) -> dict:
+def analyze_centering(card_image: np.ndarray, mode: str = "bordered") -> dict:
     """
     カードのセンタリング（印刷の対称性）を分析する。
 
-    1. カード外枠（カード全体の矩形）を検出
-    2. 内部の印刷領域（アートワーク枠）を検出
-    3. 両者の中心のオフセットからセンタリング比率を算出
+    モード:
+      - "bordered": 外枠 vs 内枠のボーダー幅比較（通常カード）
+      - "borderless": カード外縁の対称性のみ（フルアート/ボーダーレス）
+      - "gold_border": 金ボーダー検出（ポケカURなど）
+      - "thin_border": 薄ボーダー検出（ワンピSECなど）
 
     Returns:
         dict: スコアと詳細データ
@@ -26,8 +28,18 @@ def analyze_centering(card_image: np.ndarray) -> dict:
     # カード外縁の矩形（= 画像全体に近い）
     outer_rect = _detect_outer_boundary(card_image)
 
-    # 内部印刷領域の矩形を検出（複数手法のアンサンブル）
-    inner_rect = _detect_inner_frame(card_image, outer_rect)
+    if mode == "borderless":
+        # ボーダーレスカード: カード外縁の対称性で判定
+        inner_rect = _detect_borderless_inner(card_image, outer_rect)
+    elif mode == "gold_border":
+        # 金ボーダー: HSVの金色領域を検出
+        inner_rect = _detect_gold_border_inner(card_image, outer_rect)
+    elif mode == "thin_border":
+        # 薄ボーダー: より繊細なエッジ検出
+        inner_rect = _detect_thin_border_inner(card_image, outer_rect)
+    else:
+        # 標準ボーダー: 既存のアンサンブル手法
+        inner_rect = _detect_inner_frame(card_image, outer_rect)
 
     # 外枠・内枠からボーダー幅を算出
     borders = _compute_borders(outer_rect, inner_rect)
@@ -325,6 +337,164 @@ def _detect_by_contour(roi: np.ndarray) -> tuple | None:
                     best_rect = rect
 
     return best_rect
+
+
+# ---------------------------------------------------------------------------
+# モード別の内部枠検出（ボーダーレス / 金ボーダー / 薄ボーダー）
+# ---------------------------------------------------------------------------
+
+def _detect_borderless_inner(image: np.ndarray, outer_rect: tuple) -> tuple:
+    """
+    ボーダーレス/フルアートカードのセンタリング検出。
+
+    フルアートカードにはボーダーがないため、
+    カード外縁の「印刷マージン」（白い端や裁断ズレ）を検出する。
+    印刷がカード端まで達しているか、わずかな白縁があるかで判定。
+    """
+    ox, oy, ow, oh = outer_rect
+    roi = image[oy:oy+oh, ox:ox+ow]
+    h, w = roi.shape[:2]
+
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+
+    # 四辺から非常に狭い範囲（2%）をスキャンして白/淡色の縁を検出
+    scan_depth = max(3, int(min(h, w) * 0.02))
+    borders = {}
+
+    for direction in ["left", "right", "top", "bottom"]:
+        if direction == "left":
+            strip = gray[:, :scan_depth * 5]
+            profile = np.mean(strip, axis=0)
+        elif direction == "right":
+            strip = gray[:, w - scan_depth * 5:]
+            profile = np.mean(strip, axis=0)[::-1]
+        elif direction == "top":
+            strip = gray[:scan_depth * 5, :]
+            profile = np.mean(strip, axis=1)
+        else:
+            strip = gray[h - scan_depth * 5:, :]
+            profile = np.mean(strip, axis=1)[::-1]
+
+        # 明るさの変化点を検出（白縁 → 印刷領域の境界）
+        if len(profile) < 3:
+            borders[direction] = 1
+            continue
+
+        # 勾配の最大変化点
+        gradient = np.abs(np.diff(profile))
+        if len(gradient) == 0:
+            borders[direction] = 1
+            continue
+
+        # 閾値以上の変化がある最初の位置
+        threshold = np.max(gradient) * 0.3
+        significant = np.where(gradient > threshold)[0]
+        borders[direction] = int(significant[0]) + 1 if len(significant) > 0 else 1
+
+    left = borders["left"]
+    top = borders["top"]
+    right = w - borders["right"]
+    bottom = h - borders["bottom"]
+
+    return (ox + left, oy + top, right - left, bottom - top)
+
+
+def _detect_gold_border_inner(image: np.ndarray, outer_rect: tuple) -> tuple:
+    """
+    金ボーダーカード（ポケカUR等）のセンタリング検出。
+
+    HSV色空間で金色の範囲を検出し、金ボーダー領域を特定する。
+    """
+    ox, oy, ow, oh = outer_rect
+    roi = image[oy:oy+oh, ox:ox+ow]
+    h, w = roi.shape[:2]
+
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+
+    # 金色の範囲（HSV）: Hue 15-35, 高彩度、高輝度
+    lower_gold = np.array([15, 80, 120])
+    upper_gold = np.array([35, 255, 255])
+    gold_mask = cv2.inRange(hsv, lower_gold, upper_gold)
+
+    # モルフォロジーでノイズ除去
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    gold_mask = cv2.morphologyEx(gold_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    gold_mask = cv2.morphologyEx(gold_mask, cv2.MORPH_OPEN, kernel)
+
+    # 金色でない領域 = 内部印刷領域
+    inner_mask = cv2.bitwise_not(gold_mask)
+    contours, _ = cv2.findContours(inner_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if contours:
+        largest = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(largest) > h * w * 0.3:
+            bx, by, bw, bh = cv2.boundingRect(largest)
+            return (ox + bx, oy + by, bw, bh)
+
+    # フォールバック: 標準検出
+    return _detect_inner_frame(image, outer_rect)
+
+
+def _detect_thin_border_inner(image: np.ndarray, outer_rect: tuple) -> tuple:
+    """
+    薄ボーダーカード（ワンピSEC等）のセンタリング検出。
+
+    ボーダーが通常より細いため、より細かいスキャンで境界を検出する。
+    """
+    ox, oy, ow, oh = outer_rect
+    roi = image[oy:oy+oh, ox:ox+ow]
+    h, w = roi.shape[:2]
+
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    # 細かいCannyエッジで薄ボーダーの境界線を検出
+    edges = cv2.Canny(gray, 80, 200)
+
+    # 四辺からスキャン（通常より狭い範囲 = 10%まで）
+    max_scan = int(min(h, w) * 0.10)
+    results = {}
+
+    for direction in ["left", "right", "top", "bottom"]:
+        densities = []
+
+        if direction == "left":
+            for col in range(max_scan):
+                strip = edges[int(h*0.1):int(h*0.9), col]
+                densities.append(np.mean(strip > 0))
+        elif direction == "right":
+            for col in range(w - 1, w - max_scan - 1, -1):
+                strip = edges[int(h*0.1):int(h*0.9), col]
+                densities.append(np.mean(strip > 0))
+        elif direction == "top":
+            for row in range(max_scan):
+                strip = edges[row, int(w*0.1):int(w*0.9)]
+                densities.append(np.mean(strip > 0))
+        else:
+            for row in range(h - 1, h - max_scan - 1, -1):
+                strip = edges[row, int(w*0.1):int(w*0.9)]
+                densities.append(np.mean(strip > 0))
+
+        if not densities:
+            results[direction] = 2
+            continue
+
+        # ピーク検出（ボーダーの境界線 = エッジ密度のピーク）
+        smoothed = np.convolve(densities, np.ones(3) / 3, mode='valid')
+        if len(smoothed) < 3:
+            results[direction] = 2
+            continue
+
+        peak_idx = np.argmax(smoothed)
+        results[direction] = peak_idx + 2  # +2: 平滑化オフセット
+
+    left = results["left"]
+    top = results["top"]
+    right = w - results["right"]
+    bottom = h - results["bottom"]
+
+    if right <= left or bottom <= top:
+        return _detect_inner_frame(image, outer_rect)
+
+    return (ox + left, oy + top, right - left, bottom - top)
 
 
 # ---------------------------------------------------------------------------

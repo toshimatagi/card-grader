@@ -1,17 +1,28 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { gradeCard, GradeResult } from "../lib/api";
+import { useState, useCallback, useEffect } from "react";
+import { gradeCard, getBrands, GradeResult, Brand } from "../lib/api";
 import GradeResultView from "../components/result/GradeResultView";
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [cardType, setCardType] = useState("standard");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GradeResult | null>(null);
   const [dragActive, setDragActive] = useState(false);
+
+  // ブランド・レアリティ選択
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [selectedBrand, setSelectedBrand] = useState("");
+  const [selectedRarity, setSelectedRarity] = useState("");
+
+  useEffect(() => {
+    getBrands().then(setBrands).catch(() => {});
+  }, []);
+
+  const currentBrand = brands.find((b) => b.id === selectedBrand);
+  const cardType = currentBrand?.size === "small" ? "small" : "standard";
 
   const handleFile = useCallback((f: File) => {
     setFile(f);
@@ -37,7 +48,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const res = await gradeCard(file, cardType);
+      const res = await gradeCard(file, cardType, selectedBrand, selectedRarity);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "エラーが発生しました");
@@ -51,6 +62,20 @@ export default function Home() {
     setPreview(null);
     setResult(null);
     setError(null);
+  };
+
+  const brandIcons: Record<string, string> = {
+    pokemon: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png",
+    onepiece: "",
+    dragonball_fw: "",
+    yugioh: "",
+  };
+
+  const brandEmojis: Record<string, string> = {
+    pokemon: "⚡",
+    onepiece: "🏴‍☠️",
+    dragonball_fw: "🐉",
+    yugioh: "🃏",
   };
 
   return (
@@ -124,31 +149,89 @@ export default function Home() {
             )}
           </div>
 
-          {/* カードタイプ選択 */}
+          {/* ブランド選択 */}
           <div className="mt-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              カードタイプ
+              カードブランド
             </label>
-            <div className="flex gap-3">
-              {[
-                { value: "standard", label: "スタンダード", desc: "63x88mm (ポケカ/MTG)" },
-                { value: "small", label: "スモール", desc: "59x86mm (遊戯王)" },
-              ].map((opt) => (
+            <div className="grid grid-cols-2 gap-3">
+              {brands.map((brand) => (
                 <button
-                  key={opt.value}
-                  onClick={() => setCardType(opt.value)}
-                  className={`flex-1 p-3 rounded-lg border-2 text-left transition-colors ${
-                    cardType === opt.value
+                  key={brand.id}
+                  onClick={() => {
+                    setSelectedBrand(brand.id);
+                    setSelectedRarity("");
+                  }}
+                  className={`p-3 rounded-lg border-2 text-left transition-colors ${
+                    selectedBrand === brand.id
                       ? "border-blue-500 bg-blue-50"
                       : "border-gray-200 hover:border-gray-300"
                   }`}
                 >
-                  <div className="font-medium text-sm">{opt.label}</div>
-                  <div className="text-xs text-gray-500">{opt.desc}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">{brandEmojis[brand.id] || "🎴"}</span>
+                    <div>
+                      <div className="font-medium text-sm">{brand.name_ja}</div>
+                      <div className="text-xs text-gray-500">
+                        {brand.size === "small" ? "59x86mm" : "63x88mm"}
+                      </div>
+                    </div>
+                  </div>
                 </button>
               ))}
             </div>
           </div>
+
+          {/* レアリティ選択 */}
+          {currentBrand && (
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                レアリティ
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {currentBrand.rarities.map((r) => {
+                  const isBorderless = !r.has_border;
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => setSelectedRarity(r.id)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
+                        selectedRarity === r.id
+                          ? "border-blue-500 bg-blue-100 text-blue-800"
+                          : isBorderless
+                          ? "border-purple-300 bg-purple-50 text-purple-700 hover:border-purple-400"
+                          : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      {r.name_ja}
+                      {isBorderless && (
+                        <span className="ml-1 text-purple-500" title="フルアート/ボーダーレス">★</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedRarity && currentBrand.rarities.find(r => r.id === selectedRarity) && (
+                <div className="mt-2 text-xs text-gray-500">
+                  {(() => {
+                    const r = currentBrand.rarities.find(r => r.id === selectedRarity);
+                    if (!r) return null;
+                    const tags = [];
+                    if (!r.has_border) tags.push("ボーダーレス");
+                    else if (r.border_type === "gold") tags.push("金ボーダー");
+                    else if (r.border_type === "silver") tags.push("銀ボーダー");
+                    else if (r.border_type === "thin") tags.push("薄ボーダー");
+                    else tags.push("標準ボーダー");
+                    if (r.surface_type === "holo") tags.push("ホロ");
+                    else if (r.surface_type === "textured") tags.push("テクスチャ加工");
+                    else if (r.surface_type === "gold") tags.push("ゴールド加工");
+                    else if (r.surface_type === "reverse_holo") tags.push("リバースホロ");
+                    return `分析モード: ${tags.join(" / ")}`;
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* エラー表示 */}
           {error && (
@@ -160,9 +243,9 @@ export default function Home() {
           {/* 鑑定ボタン */}
           <button
             onClick={handleSubmit}
-            disabled={!file || loading}
+            disabled={!file || loading || !selectedBrand}
             className={`mt-6 w-full py-3 rounded-lg font-medium text-white transition-colors ${
-              !file || loading
+              !file || loading || !selectedBrand
                 ? "bg-gray-400 cursor-not-allowed"
                 : "bg-blue-600 hover:bg-blue-700"
             }`}
@@ -172,6 +255,8 @@ export default function Home() {
                 <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
                 鑑定中...
               </span>
+            ) : !selectedBrand ? (
+              "ブランドを選択してください"
             ) : (
               "鑑定開始"
             )}

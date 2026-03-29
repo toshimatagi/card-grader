@@ -7,6 +7,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import Optional
 
 from ..services.grading import grade_card
+from ..services.card_brands import brands_to_api_response
 from ..db.supabase_client import (
     insert_grading,
     get_grading,
@@ -21,11 +22,19 @@ from ..db.supabase_client import (
 router = APIRouter(prefix="/api/v1", tags=["grading"])
 
 
+@router.get("/brands")
+async def get_brands():
+    """カードブランド・レアリティ一覧を返す"""
+    return brands_to_api_response()
+
+
 @router.post("/grade")
 async def create_grade(
     front_image: UploadFile = File(...),
     back_image: Optional[UploadFile] = File(None),
     card_type: str = Form("standard"),
+    brand: str = Form(""),
+    rarity: str = Form(""),
 ):
     """カード鑑定を実行し、結果をDBに永続化する"""
     if front_image.content_type not in ("image/jpeg", "image/png", "image/webp"):
@@ -39,7 +48,7 @@ async def create_grade(
         raise HTTPException(400, "画像データが空です")
 
     try:
-        result = grade_card(image_bytes, card_type=card_type)
+        result = grade_card(image_bytes, card_type=card_type, brand=brand, rarity=rarity)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
