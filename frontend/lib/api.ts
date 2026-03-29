@@ -52,6 +52,24 @@ export async function getBrands(): Promise<Brand[]> {
   return res.json();
 }
 
+export async function preprocessImage(
+  frontImage: File
+): Promise<{ card_image: string; card_type: string }> {
+  const formData = new FormData();
+  formData.append("front_image", frontImage);
+
+  const res = await fetch(`${API_BASE}/api/v1/preprocess`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    throw new Error("画像の前処理に失敗しました");
+  }
+
+  return res.json();
+}
+
 export async function gradeCard(
   frontImage: File,
   cardType: string = "standard",

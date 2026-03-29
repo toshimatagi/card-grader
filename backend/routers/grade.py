@@ -136,6 +136,51 @@ async def delete_grade_history(grade_id: str):
     return {"message": "削除しました"}
 
 
+@router.post("/preprocess")
+async def preprocess_image(
+    front_image: UploadFile = File(...),
+):
+    """画像の正面化（パースペクティブ補正）だけを行い、補正済み画像を返す"""
+    if front_image.content_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(400, "対応画像形式: JPEG, PNG, WebP")
+
+    image_bytes = await front_image.read()
+    if len(image_bytes) == 0:
+        raise HTTPException(400, "画像データが空です")
+
+    from ..services.preprocessing import detect_card
+
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(400, "画像のデコードに失敗しました")
+
+    # 長辺1200pxにリサイズ
+    h, w = image.shape[:2]
+    if max(h, w) > 1200:
+        scale = 1200 / max(h, w)
+        image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+    # 前処理: カード検出 + 正面化
+    card_data = detect_card(image)
+    card_image = card_data["card_image"]
+
+    # 長辺800pxにリサイズ
+    ch, cw = card_image.shape[:2]
+    if max(ch, cw) > 800:
+        scale = 800 / max(ch, cw)
+        card_image = cv2.resize(card_image, (int(cw * scale), int(ch * scale)), interpolation=cv2.INTER_AREA)
+
+    # Base64エンコード
+    _, buffer = cv2.imencode(".jpg", card_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    card_b64 = base64.b64encode(buffer).decode("utf-8")
+
+    return {
+        "card_image": card_b64,
+        "card_type": card_data["card_type"],
+    }
+
+
 @router.get("/ebay/sold")
 async def ebay_sold_search(q: str, brand: str = ""):
     """eBayのSold Listings（販売済み商品）を検索"""

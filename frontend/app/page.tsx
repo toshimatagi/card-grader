@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { gradeCard, getBrands, GradeResult, Brand } from "../lib/api";
+import { gradeCard, getBrands, preprocessImage, GradeResult, Brand } from "../lib/api";
 import GradeResultView from "../components/result/GradeResultView";
 import CenteringEditor from "../components/centering/CenteringEditor";
 
@@ -16,6 +16,7 @@ export default function Home() {
   const [dragActive, setDragActive] = useState(false);
   const [step, setStep] = useState<AppStep>("upload");
   const [manualCentering, setManualCentering] = useState<Record<string, unknown> | null>(null);
+  const [correctedImage, setCorrectedImage] = useState<string | null>(null);
 
   // ブランド・レアリティ選択
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -49,10 +50,20 @@ export default function Home() {
     [handleFile]
   );
 
-  // 「鑑定開始」ボタン → センタリングエディターへ
-  const handleSubmit = () => {
+  // 「鑑定開始」ボタン → 正面化API → センタリングエディターへ
+  const handleSubmit = async () => {
     if (!file) return;
-    setStep("centering");
+    setLoading(true);
+    setError(null);
+    try {
+      const preprocessed = await preprocessImage(file);
+      setCorrectedImage(`data:image/jpeg;base64,${preprocessed.card_image}`);
+      setStep("centering");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "前処理に失敗しました");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetForm = () => {
@@ -62,6 +73,7 @@ export default function Home() {
     setError(null);
     setStep("upload");
     setManualCentering(null);
+    setCorrectedImage(null);
   };
 
   // センタリングエディターからの結果で鑑定開始
@@ -116,7 +128,7 @@ export default function Home() {
   return (
     <div>
       {/* Step 2: センタリングエディター */}
-      {step === "centering" && preview && (
+      {step === "centering" && (correctedImage || preview) && (
         <div className="max-w-2xl mx-auto">
           <button
             onClick={() => setStep("upload")}
@@ -125,7 +137,7 @@ export default function Home() {
             ← 戻る
           </button>
           <CenteringEditor
-            imageSrc={preview}
+            imageSrc={correctedImage || preview!}
             onComplete={(r) => handleCenteringComplete(r as unknown as Record<string, unknown>)}
             onSkip={handleSkipCentering}
           />
