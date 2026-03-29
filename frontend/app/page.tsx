@@ -3,6 +3,9 @@
 import { useState, useCallback, useEffect } from "react";
 import { gradeCard, getBrands, GradeResult, Brand } from "../lib/api";
 import GradeResultView from "../components/result/GradeResultView";
+import CenteringEditor from "../components/centering/CenteringEditor";
+
+type AppStep = "upload" | "centering" | "result";
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
@@ -11,6 +14,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GradeResult | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [step, setStep] = useState<AppStep>("upload");
+  const [manualCentering, setManualCentering] = useState<Record<string, unknown> | null>(null);
 
   // ブランド・レアリティ選択
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -43,18 +48,10 @@ export default function Home() {
     [handleFile]
   );
 
-  const handleSubmit = async () => {
+  // 「鑑定開始」ボタン → センタリングエディターへ
+  const handleSubmit = () => {
     if (!file) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await gradeCard(file, cardType, selectedBrand, selectedRarity);
-      setResult(res);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "エラーが発生しました");
-    } finally {
-      setLoading(false);
-    }
+    setStep("centering");
   };
 
   const resetForm = () => {
@@ -62,6 +59,43 @@ export default function Home() {
     setPreview(null);
     setResult(null);
     setError(null);
+    setStep("upload");
+    setManualCentering(null);
+  };
+
+  // センタリングエディターからの結果で鑑定開始
+  const handleCenteringComplete = async (centeringResult: Record<string, unknown>) => {
+    setManualCentering(centeringResult);
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+    setStep("result");
+    try {
+      const res = await gradeCard(file, cardType, selectedBrand, selectedRarity, centeringResult);
+      setResult(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "エラーが発生しました");
+      setStep("centering");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 自動検出で鑑定（センタリングエディターをスキップ）
+  const handleSkipCentering = async () => {
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+    setStep("result");
+    try {
+      const res = await gradeCard(file, cardType, selectedBrand, selectedRarity);
+      setResult(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "エラーが発生しました");
+      setStep("upload");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const brandIcons: Record<string, string> = {
@@ -80,7 +114,36 @@ export default function Home() {
 
   return (
     <div>
-      {!result ? (
+      {/* Step 2: センタリングエディター */}
+      {step === "centering" && preview && (
+        <div className="max-w-2xl mx-auto">
+          <button
+            onClick={() => setStep("upload")}
+            className="mb-4 text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
+          >
+            ← 戻る
+          </button>
+          <CenteringEditor
+            imageSrc={preview}
+            onComplete={(r) => handleCenteringComplete(r as unknown as Record<string, unknown>)}
+            onSkip={handleSkipCentering}
+          />
+          {loading && (
+            <div className="mt-4 text-center">
+              <span className="animate-spin inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full" />
+              <p className="text-sm text-gray-600 mt-2">鑑定中...</p>
+            </div>
+          )}
+          {error && (
+            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Step 1: アップロード */}
+      {step === "upload" ? (
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold mb-2">カード鑑定</h1>
@@ -262,7 +325,7 @@ export default function Home() {
             )}
           </button>
         </div>
-      ) : (
+      ) : step === "result" && result ? (
         <div>
           <button
             onClick={resetForm}
@@ -272,7 +335,12 @@ export default function Home() {
           </button>
           <GradeResultView result={result} />
         </div>
-      )}
+      ) : step === "result" && loading ? (
+        <div className="max-w-2xl mx-auto text-center py-20">
+          <span className="animate-spin inline-block w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full" />
+          <p className="text-gray-600 mt-4">鑑定中...</p>
+        </div>
+      ) : null}
     </div>
   );
 }

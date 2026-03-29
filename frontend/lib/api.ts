@@ -56,13 +56,17 @@ export async function gradeCard(
   frontImage: File,
   cardType: string = "standard",
   brand: string = "",
-  rarity: string = ""
+  rarity: string = "",
+  manualCentering?: Record<string, unknown>
 ): Promise<GradeResult> {
   const formData = new FormData();
   formData.append("front_image", frontImage);
   formData.append("card_type", cardType);
   formData.append("brand", brand);
   formData.append("rarity", rarity);
+  if (manualCentering) {
+    formData.append("manual_centering", JSON.stringify(manualCentering));
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120000);
