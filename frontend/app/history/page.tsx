@@ -22,6 +22,14 @@ export default function HistoryPage() {
     return "text-red-600 bg-red-50";
   };
 
+  const cardTypeLabel = (type: string): string => {
+    switch (type) {
+      case "standard": return "スタンダード";
+      case "small": return "スモール";
+      default: return type;
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -32,7 +40,12 @@ export default function HistoryPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">鑑定履歴</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">鑑定履歴</h1>
+        {items.length > 0 && (
+          <span className="text-sm text-gray-500">{items.length}件</span>
+        )}
+      </div>
 
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm mb-4">
@@ -51,23 +64,24 @@ export default function HistoryPage() {
       ) : (
         <div className="space-y-3">
           {items.map((item) => (
-            <a
+            <div
               key={item.id}
-              href={`/result?id=${item.id}`}
-              className="block bg-white rounded-lg border shadow-sm p-4 hover:shadow-md transition-shadow"
+              className="bg-white rounded-lg border shadow-sm p-4 hover:shadow-md transition-shadow"
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm text-gray-500">
-                    {new Date(item.created_at).toLocaleString("ja-JP")}
+                  <div className="text-sm font-medium text-gray-800">
+                    {cardTypeLabel(item.card_type)}
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">
-                    {item.card_type === "standard" ? "スタンダード" : "スモール"}
+                  <div className="text-xs text-gray-500 mt-1">
+                    {new Date(item.created_at).toLocaleString("ja-JP")}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="text-xs text-gray-500">
-                    信頼度 {(item.confidence * 100).toFixed(0)}%
+                  <div className="text-right">
+                    <div className="text-xs text-gray-500">
+                      信頼度 {(item.confidence * 100).toFixed(0)}%
+                    </div>
                   </div>
                   <div
                     className={`text-xl font-bold px-3 py-1 rounded-lg ${gradeColor(
@@ -78,7 +92,7 @@ export default function HistoryPage() {
                   </div>
                 </div>
               </div>
-            </a>
+            </div>
           ))}
         </div>
       )}
