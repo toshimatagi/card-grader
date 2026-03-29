@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { searchEbaySold, EbaySoldItem } from "../../lib/api";
+import { searchEbaySold, EbaySoldItem, EbaySoldStats } from "../../lib/api";
 
 interface Props {
   cardName: string;
@@ -10,6 +10,7 @@ interface Props {
 
 export default function EbaySoldPrices({ cardName, brand }: Props) {
   const [items, setItems] = useState<EbaySoldItem[]>([]);
+  const [stats, setStats] = useState<EbaySoldStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,22 +20,16 @@ export default function EbaySoldPrices({ cardName, brand }: Props) {
     setLoading(true);
     setError(null);
     searchEbaySold(cardName, brand)
-      .then((data) => {
-        setItems(data);
-        if (data.length === 0) setError("該当する販売履歴が見つかりませんでした");
+      .then((result) => {
+        setItems(result.items);
+        setStats(result.stats);
+        if (result.items.length === 0) setError("該当する販売履歴が見つかりませんでした");
       })
       .catch(() => setError("eBayデータの取得に失敗しました"))
       .finally(() => setLoading(false));
   }, [cardName, brand]);
 
   if (!cardName.trim()) return null;
-
-  const avgPrice = items.length > 0
-    ? items.reduce((sum, i) => sum + i.price, 0) / items.length
-    : 0;
-
-  const minPrice = items.length > 0 ? Math.min(...items.map(i => i.price)) : 0;
-  const maxPrice = items.length > 0 ? Math.max(...items.map(i => i.price)) : 0;
 
   return (
     <div className="bg-white rounded-xl border shadow-sm p-6">
@@ -57,26 +52,34 @@ export default function EbaySoldPrices({ cardName, brand }: Props) {
       {!loading && items.length > 0 && (
         <>
           {/* 価格サマリー */}
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <div className="bg-blue-50 rounded-lg p-3 text-center">
-              <div className="text-xs text-gray-500">平均</div>
-              <div className="text-lg font-bold text-blue-700">
-                ${avgPrice.toFixed(2)}
+          {stats && (
+            <div className="grid grid-cols-4 gap-3 mb-4">
+              <div className="bg-blue-50 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500">平均</div>
+                <div className="text-lg font-bold text-blue-700">
+                  ${stats.avg_price.toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-purple-50 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500">中央値</div>
+                <div className="text-lg font-bold text-purple-700">
+                  ${stats.median_price.toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-green-50 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500">最安</div>
+                <div className="text-lg font-bold text-green-700">
+                  ${stats.min_price.toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-red-50 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500">最高</div>
+                <div className="text-lg font-bold text-red-700">
+                  ${stats.max_price.toFixed(2)}
+                </div>
               </div>
             </div>
-            <div className="bg-green-50 rounded-lg p-3 text-center">
-              <div className="text-xs text-gray-500">最安</div>
-              <div className="text-lg font-bold text-green-700">
-                ${minPrice.toFixed(2)}
-              </div>
-            </div>
-            <div className="bg-red-50 rounded-lg p-3 text-center">
-              <div className="text-xs text-gray-500">最高</div>
-              <div className="text-lg font-bold text-red-700">
-                ${maxPrice.toFixed(2)}
-              </div>
-            </div>
-          </div>
+          )}
 
           {/* 販売一覧 */}
           <div className="space-y-2 max-h-80 overflow-y-auto">

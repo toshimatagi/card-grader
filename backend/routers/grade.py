@@ -132,4 +132,18 @@ async def ebay_sold_search(q: str, brand: str = ""):
     if not q.strip():
         raise HTTPException(400, "検索クエリを指定してください")
     items = await search_sold_items(q, brand)
-    return {"items": items, "total": len(items)}
+
+    # 価格統計
+    prices = [i["price"] for i in items if i.get("price", 0) > 0]
+    stats = {}
+    if prices:
+        sorted_prices = sorted(prices)
+        stats = {
+            "avg_price": round(sum(prices) / len(prices), 2),
+            "min_price": min(prices),
+            "max_price": max(prices),
+            "median_price": sorted_prices[len(sorted_prices) // 2],
+            "count": len(prices),
+        }
+
+    return {"items": items, "stats": stats, "total": len(items)}

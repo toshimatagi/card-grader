@@ -117,13 +117,31 @@ export interface EbaySoldItem {
   condition: string;
 }
 
+export interface EbaySoldStats {
+  avg_price: number;
+  min_price: number;
+  max_price: number;
+  median_price: number;
+  count: number;
+}
+
+export interface EbaySoldResult {
+  items: EbaySoldItem[];
+  stats: EbaySoldStats | null;
+  total: number;
+}
+
 export async function searchEbaySold(
   query: string,
   brand: string = ""
-): Promise<EbaySoldItem[]> {
+): Promise<EbaySoldResult> {
   const params = new URLSearchParams({ q: query, brand });
   const res = await fetch(`${API_BASE}/api/v1/ebay/sold?${params}`);
-  if (!res.ok) return [];
+  if (!res.ok) return { items: [], stats: null, total: 0 };
   const data = await res.json();
-  return data.items || [];
+  return {
+    items: data.items || [],
+    stats: data.stats || null,
+    total: data.total || 0,
+  };
 }
