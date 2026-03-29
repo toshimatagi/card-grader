@@ -36,6 +36,7 @@ async def create_grade(
     card_type: str = Form("standard"),
     brand: str = Form(""),
     rarity: str = Form(""),
+    manual_centering: Optional[str] = Form(None),
 ):
     """カード鑑定を実行し、結果をDBに永続化する"""
     if front_image.content_type not in ("image/jpeg", "image/png", "image/webp"):
@@ -48,8 +49,17 @@ async def create_grade(
     if len(image_bytes) == 0:
         raise HTTPException(400, "画像データが空です")
 
+    # 手動センタリングデータのパース
+    manual_centering_data = None
+    if manual_centering:
+        import json
+        try:
+            manual_centering_data = json.loads(manual_centering)
+        except json.JSONDecodeError:
+            pass
+
     try:
-        result = grade_card(image_bytes, card_type=card_type, brand=brand, rarity=rarity)
+        result = grade_card(image_bytes, card_type=card_type, brand=brand, rarity=rarity, manual_centering=manual_centering_data)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:

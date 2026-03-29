@@ -26,7 +26,8 @@ WEIGHTS = {
 
 def grade_card(image_bytes: bytes, card_type: str = "standard",
                brand: str = "", rarity: str = "",
-               options: dict | None = None) -> dict:
+               options: dict | None = None,
+               manual_centering: dict | None = None) -> dict:
     """
     カード画像を総合鑑定する。
 
@@ -69,7 +70,11 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     border_ratios = get_border_ratios(brand) if brand else None
 
     # 2. 各分析を実行
-    centering_result = analyze_centering(card_image, mode=centering_mode, border_ratios=border_ratios)
+    # 手動センタリングが指定されている場合はそれを使用
+    if manual_centering and "lr_ratio" in manual_centering:
+        centering_result = _build_manual_centering_result(manual_centering, card_image)
+    else:
+        centering_result = analyze_centering(card_image, mode=centering_mode, border_ratios=border_ratios)
     surface_result = analyze_surface(card_image)
     color_result = analyze_color(card_image)
     edges_result = analyze_edges(card_image)
@@ -129,6 +134,80 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
         },
         "overlay_images": overlay_images,
         "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _build_manual_centering_result(manual: dict, card_image: np.ndarray) -> dict:
+    """
+    フロントエンドの手動センタリングデータから、
+    自動検出と同じフォーマットの結果を構築する。
+    """
+    h, w = card_image.shape[:2]
+
+    lr_ratio = manual.get("lr_ratio", "50/50")
+    tb_ratio = manual.get("tb_ratio", "50/50")
+    left_border = manual.get("left_border", 0)
+    right_border = manual.get("right_border", 0)
+    top_border = manual.get("top_border", 0)
+    bottom_border = manual.get("bottom_border", 0)
+
+    # LR/TBの大きい方からスコアを算出
+    lr_parts = lr_ratio.split("/")
+    tb_parts = tb_ratio.split("/")
+    lr_larger = int(lr_parts[0]) if len(lr_parts) == 2 else 50
+    tb_larger = int(tb_parts[0]) if len(tb_parts) == 2 else 50
+    max_deviation = max(lr_larger, tb_larger)
+
+    # PSA基準のスコア
+    if max_deviation <= 50:
+        score = 10.0
+    elif max_deviation <= 55:
+        score = 9.5 - (max_deviation - 50) * 0.1
+    elif max_deviation <= 60:
+        score = 9.0 - (max_deviation - 55) * 0.2
+    elif max_deviation <= 65:
+        score = 8.0 - (max_deviation - 60) * 0.2
+    elif max_deviation <= 70:
+        score = 7.0 - (max_deviation - 65) * 0.2
+    else:
+        score = max(1.0, 6.0 - (max_deviation - 70) * 0.1)
+
+    # オーバーレイ画像を生成（手動位置を反映）
+    overlay = card_image.copy()
+
+    # 外枠（黄色）
+    ox1 = max(0, left_border - int(left_border * 0.2)) if left_border > 5 else 0
+    oy1 = max(0, top_border - int(top_border * 0.2)) if top_border > 5 else 0
+    ox2 = min(w, w - right_border + int(right_border * 0.2)) if right_border > 5 else w
+    oy2 = min(h, h - bottom_border + int(bottom_border * 0.2)) if bottom_border > 5 else h
+    cv2.rectangle(overlay, (ox1, oy1), (ox2, oy2), (0, 255, 255), 2)
+
+    # 内枠（緑）
+    ix1 = left_border
+    iy1 = top_border
+    ix2 = w - right_border
+    iy2 = h - bottom_border
+    cv2.rectangle(overlay, (ix1, iy1), (ix2, iy2), (0, 255, 0), 2)
+
+    # テキスト表示
+    cv2.putText(overlay, f"LR: {lr_ratio} (L:{left_border} R:{right_border})",
+                (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    cv2.putText(overlay, f"TB: {tb_ratio} (T:{top_border} B:{bottom_border})",
+                (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    cv2.putText(overlay, "[Manual]", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 255), 1)
+
+    return {
+        "score": round(score, 1),
+        "detail": {
+            "lr_ratio": lr_ratio,
+            "tb_ratio": tb_ratio,
+            "left_border": left_border,
+            "right_border": right_border,
+            "top_border": top_border,
+            "bottom_border": bottom_border,
+            "mode": "manual",
+        },
+        "overlay": overlay,
     }
 
 
