@@ -12,7 +12,7 @@ from .centering import analyze_centering
 from .surface import analyze_surface
 from .color import analyze_color
 from .edges import analyze_edges
-from .card_brands import get_brand, get_centering_mode
+from .card_brands import get_brand, get_centering_mode, get_border_ratios
 
 
 # 各分析の重み
@@ -64,11 +64,12 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
         if brand_info:
             card_type = brand_info.size
 
-    # センタリングモードを決定
+    # センタリングモードとボーダー比率を決定
     centering_mode = get_centering_mode(brand, rarity) if brand else "bordered"
+    border_ratios = get_border_ratios(brand) if brand else None
 
     # 2. 各分析を実行
-    centering_result = analyze_centering(card_image, mode=centering_mode)
+    centering_result = analyze_centering(card_image, mode=centering_mode, border_ratios=border_ratios)
     surface_result = analyze_surface(card_image)
     color_result = analyze_color(card_image)
     edges_result = analyze_edges(card_image)

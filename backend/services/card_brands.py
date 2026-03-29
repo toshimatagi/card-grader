@@ -23,6 +23,10 @@ class CardBrand:
     name_ja: str
     name_en: str
     size: str  # "standard" (63x88mm) | "small" (59x86mm)
+    # ボーダー比率（カード幅/高さに対するボーダー幅の比率）
+    border_ratio_lr: float = 0.045  # 左右ボーダー ≈ カード幅の4.5%
+    border_ratio_top: float = 0.035  # 上ボーダー
+    border_ratio_bottom: float = 0.065  # 下ボーダー（名前欄分やや広い）
     rarities: list[CardRarity] = field(default_factory=list)
 
 
@@ -34,6 +38,9 @@ POKEMON = CardBrand(
     name_ja="ポケモンカードゲーム",
     name_en="Pokemon TCG",
     size="standard",
+    border_ratio_lr=0.048,
+    border_ratio_top=0.040,
+    border_ratio_bottom=0.070,
     rarities=[
         CardRarity("c", "コモン (C)", "Common", True, "standard", "normal"),
         CardRarity("uc", "アンコモン (UC)", "Uncommon", True, "standard", "normal"),
@@ -57,6 +64,9 @@ ONE_PIECE = CardBrand(
     name_ja="ONE PIECEカードゲーム",
     name_en="One Piece Card Game",
     size="standard",
+    border_ratio_lr=0.038,
+    border_ratio_top=0.030,
+    border_ratio_bottom=0.055,
     rarities=[
         CardRarity("c", "コモン (C)", "Common", True, "standard", "normal"),
         CardRarity("uc", "アンコモン (UC)", "Uncommon", True, "standard", "normal"),
@@ -82,6 +92,9 @@ DRAGONBALL_FW = CardBrand(
     name_ja="ドラゴンボール Fusion World",
     name_en="Dragon Ball Fusion World",
     size="standard",
+    border_ratio_lr=0.042,
+    border_ratio_top=0.035,
+    border_ratio_bottom=0.060,
     rarities=[
         CardRarity("c", "コモン (C)", "Common", True, "standard", "normal"),
         CardRarity("uc", "アンコモン (UC)", "Uncommon", True, "standard", "normal"),
@@ -104,6 +117,9 @@ YUGIOH = CardBrand(
     name_ja="遊戯王OCG",
     name_en="Yu-Gi-Oh! OCG",
     size="small",
+    border_ratio_lr=0.045,
+    border_ratio_top=0.035,
+    border_ratio_bottom=0.060,
     rarities=[
         CardRarity("n", "ノーマル (N)", "Normal", True, "standard", "normal"),
         CardRarity("nr", "ノーマルレア (NR)", "Normal Rare", True, "standard", "normal"),
@@ -145,6 +161,18 @@ def get_rarity(brand_id: str, rarity_id: str) -> CardRarity | None:
         if r.id == rarity_id:
             return r
     return None
+
+
+def get_border_ratios(brand_id: str) -> dict:
+    """ブランドの既知ボーダー比率を返す"""
+    brand = get_brand(brand_id)
+    if not brand:
+        return {"lr": 0.045, "top": 0.035, "bottom": 0.065}
+    return {
+        "lr": brand.border_ratio_lr,
+        "top": brand.border_ratio_top,
+        "bottom": brand.border_ratio_bottom,
+    }
 
 
 def get_centering_mode(brand_id: str, rarity_id: str) -> str:
