@@ -96,39 +96,52 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
     });
   }, [imageLoaded, imageSize]);
 
+  // 画像内ラッパーのref（ガイドラインの親要素）
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // マウス座標 → 画像上の比率(0-1)に変換
+  const clientToRatio = useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } => {
+      const wrapper = wrapperRef.current;
+      if (!wrapper) return { x: 0.5, y: 0.5 };
+      const rect = wrapper.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left) / rect.width,
+        y: (clientY - rect.top) / rect.height,
+      };
+    },
+    []
+  );
+
   // ガイドラインのドラッグ
   const handlePointerDown = useCallback(
     (lineId: string, e: React.PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
       setDragging(lineId);
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      // containerにポインターキャプチャを設定（ライン外に出てもドラッグ継続）
+      containerRef.current?.setPointerCapture(e.pointerId);
     },
     []
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
-      if (!dragging || !containerRef.current) return;
+      if (!dragging) return;
 
-      const rect = containerRef.current.getBoundingClientRect();
+      const { x, y } = clientToRatio(e.clientX, e.clientY);
       const isVertical = dragging.includes("Left") || dragging.includes("Right");
+      const value = isVertical ? x : y;
+      const clamped = Math.max(0.01, Math.min(0.99, value));
 
-      if (isVertical) {
-        const x = (e.clientX - rect.left) / (displaySize.w * zoom) - panOffset.x / (displaySize.w * zoom);
-        const clamped = Math.max(0.01, Math.min(0.99, x));
-        setGuides((prev) => ({ ...prev, [dragging]: clamped }));
-      } else {
-        const y = (e.clientY - rect.top) / (displaySize.h * zoom) - panOffset.y / (displaySize.h * zoom);
-        const clamped = Math.max(0.01, Math.min(0.99, y));
-        setGuides((prev) => ({ ...prev, [dragging]: clamped }));
-      }
+      setGuides((prev) => ({ ...prev, [dragging]: clamped }));
     },
-    [dragging, displaySize, zoom, panOffset]
+    [dragging, clientToRatio]
   );
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
     setDragging(null);
+    containerRef.current?.releasePointerCapture(e.pointerId);
   }, []);
 
   // センタリング計算
@@ -221,13 +234,14 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
         onPointerDown={(e) => handlePointerDown(id, e)}
         title={label}
       >
-        {/* ドラッグハンドル（太めのタッチ領域） */}
+        {/* ドラッグハンドル（広めのタッチ領域） */}
         <div
           style={{
             position: "absolute",
             ...(orientation === "vertical"
-              ? { left: "-8px", right: "-8px", top: 0, bottom: 0 }
-              : { top: "-8px", bottom: "-8px", left: 0, right: 0 }),
+              ? { left: "-12px", right: "-12px", top: 0, bottom: 0 }
+              : { top: "-12px", bottom: "-12px", left: 0, right: 0 }),
+            cursor: orientation === "vertical" ? "ew-resize" : "ns-resize",
           }}
         />
         {/* ラベル */}
@@ -323,8 +337,9 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
         onWheel={handleWheel}
       >
         <div
+          ref={wrapperRef}
           style={{
-            transform: `scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px)`,
+            transform: `scale(${zoom})`,
             transformOrigin: "center center",
             position: "relative",
             width: displaySize.w || "100%",
