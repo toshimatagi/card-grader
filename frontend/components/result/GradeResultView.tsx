@@ -3,9 +3,12 @@
 import { useState } from "react";
 import { GradeResult } from "../../lib/api";
 import ScoreGauge from "./ScoreGauge";
+import EbaySoldPrices from "./EbaySoldPrices";
 
 interface Props {
   result: GradeResult;
+  cardName?: string;
+  brand?: string;
 }
 
 const SUB_GRADE_LABELS: Record<string, { label: string; icon: string }> = {
@@ -22,7 +25,7 @@ const OVERLAY_LABELS: Record<string, string> = {
   edges_corners: "エッジ・角",
 };
 
-export default function GradeResultView({ result }: Props) {
+export default function GradeResultView({ result, cardName, brand }: Props) {
   const [activeOverlay, setActiveOverlay] = useState<string | null>(null);
 
   const gradeColor = (score: number): string => {
@@ -259,6 +262,9 @@ export default function GradeResultView({ result }: Props) {
           </DetailSection>
         </div>
       </div>
+
+      {/* eBay Sold価格 */}
+      {cardName && <EbaySoldPrices cardName={cardName} brand={brand || ""} />}
     </div>
   );
 }

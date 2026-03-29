@@ -8,6 +8,7 @@ from typing import Optional
 
 from ..services.grading import grade_card
 from ..services.card_brands import brands_to_api_response
+from ..services.ebay import search_sold_items
 from ..db.supabase_client import (
     insert_grading,
     get_grading,
@@ -123,3 +124,12 @@ async def delete_grade_history(grade_id: str):
     if not deleted:
         raise HTTPException(404, "鑑定結果が見つかりません")
     return {"message": "削除しました"}
+
+
+@router.get("/ebay/sold")
+async def ebay_sold_search(q: str, brand: str = ""):
+    """eBayのSold Listings（販売済み商品）を検索"""
+    if not q.strip():
+        raise HTTPException(400, "検索クエリを指定してください")
+    items = await search_sold_items(q, brand)
+    return {"items": items, "total": len(items)}

@@ -106,3 +106,24 @@ export async function getHistory(): Promise<{ total: number; items: HistoryItem[
   if (!res.ok) throw new Error("履歴の取得に失敗しました");
   return res.json();
 }
+
+export interface EbaySoldItem {
+  title: string;
+  price: number;
+  currency: string;
+  sold_date: string;
+  image_url: string;
+  item_url: string;
+  condition: string;
+}
+
+export async function searchEbaySold(
+  query: string,
+  brand: string = ""
+): Promise<EbaySoldItem[]> {
+  const params = new URLSearchParams({ q: query, brand });
+  const res = await fetch(`${API_BASE}/api/v1/ebay/sold?${params}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.items || [];
+}
