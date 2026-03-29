@@ -79,23 +79,158 @@ def analyze_centering(card_image: np.ndarray, mode: str = "bordered",
 # ---------------------------------------------------------------------------
 
 def _detect_outer_boundary(image: np.ndarray) -> tuple:
-    """カードの外枠を検出。前処理済み画像なので全体に近い。"""
+    """
+    カードの外枠を検出。背景が残っている場合も正確に検出する。
+
+    3つの方法を試し、最も妥当な結果を採用:
+      1. エッジベース: Cannyエッジで最大矩形輪郭を検出
+      2. 四辺スキャン: 各辺から走査して明度変化点を検出
+      3. 背景色マスク: 四隅の色を背景として除外
+    """
     h, w = image.shape[:2]
-
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    results = []
+
+    # --- 方法1: エッジベースの矩形検出 ---
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
+    edges = cv2.Canny(blurred, 30, 100)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    edges = cv2.dilate(edges, kernel, iterations=2)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
         largest = max(contours, key=cv2.contourArea)
         if cv2.contourArea(largest) > h * w * 0.3:
-            return cv2.boundingRect(largest)
+            results.append(cv2.boundingRect(largest))
 
-    margin_x = int(w * 0.02)
-    margin_y = int(h * 0.02)
-    return (margin_x, margin_y, w - 2 * margin_x, h - 2 * margin_y)
+    # --- 方法2: 四辺からの明度変化スキャン ---
+    scan_result = _scan_card_edges(gray)
+    if scan_result:
+        results.append(scan_result)
+
+    # --- 方法3: 背景色マスク ---
+    bg_result = _detect_by_background_mask(image)
+    if bg_result:
+        results.append(bg_result)
+
+    if not results:
+        margin_x = int(w * 0.02)
+        margin_y = int(h * 0.02)
+        return (margin_x, margin_y, w - 2 * margin_x, h - 2 * margin_y)
+
+    # 結果が複数ある場合、最も「内側」（タイトな）結果を採用
+    # = 背景を含まない最もタイトなバウンディングボックス
+    best = max(results, key=lambda r: _boundary_quality(r, w, h))
+    return best
+
+
+def _scan_card_edges(gray: np.ndarray) -> tuple | None:
+    """四辺から走査して明度の急変点（カード端）を検出"""
+    h, w = gray.shape
+    max_scan = int(min(h, w) * 0.2)
+    edges = {}
+
+    for direction in ["left", "right", "top", "bottom"]:
+        profiles = []
+        if direction == "left":
+            for y in range(int(h * 0.3), int(h * 0.7), max(1, h // 8)):
+                profiles.append(gray[y, :max_scan].astype(float))
+        elif direction == "right":
+            for y in range(int(h * 0.3), int(h * 0.7), max(1, h // 8)):
+                profiles.append(gray[y, w - max_scan:][::-1].astype(float))
+        elif direction == "top":
+            for x in range(int(w * 0.3), int(w * 0.7), max(1, w // 8)):
+                profiles.append(gray[:max_scan, x].astype(float))
+        else:
+            for x in range(int(w * 0.3), int(w * 0.7), max(1, w // 8)):
+                profiles.append(gray[h - max_scan:, x][::-1].astype(float))
+
+        positions = []
+        for profile in profiles:
+            if len(profile) < 5:
+                continue
+            gradient = np.abs(np.diff(profile))
+            if len(gradient) == 0:
+                continue
+            threshold = np.mean(gradient) + 2 * np.std(gradient)
+            if threshold < 5:
+                continue
+            peaks = np.where(gradient > threshold)[0]
+            if len(peaks) > 0:
+                positions.append(int(peaks[0]))
+
+        edges[direction] = int(np.median(positions)) if positions else 0
+
+    left = edges["left"]
+    top = edges["top"]
+    right = w - edges["right"]
+    bottom = h - edges["bottom"]
+
+    if right - left < w * 0.5 or bottom - top < h * 0.5:
+        return None
+
+    return (left, top, right - left, bottom - top)
+
+
+def _detect_by_background_mask(image: np.ndarray) -> tuple | None:
+    """四隅のピクセルを背景色とし、それと異なる領域をカードとして検出"""
+    h, w = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+    corner_size = max(5, int(min(h, w) * 0.03))
+    corners = np.vstack([
+        hsv[:corner_size, :corner_size, :].reshape(-1, 3),
+        hsv[:corner_size, w - corner_size:, :].reshape(-1, 3),
+        hsv[h - corner_size:, :corner_size, :].reshape(-1, 3),
+        hsv[h - corner_size:, w - corner_size:, :].reshape(-1, 3),
+    ])
+
+    bg_h = np.median(corners[:, 0])
+    bg_s = np.median(corners[:, 1])
+    bg_v = np.median(corners[:, 2])
+
+    hue_diff = np.abs(hsv[:, :, 0].astype(float) - bg_h)
+    hue_diff = np.minimum(hue_diff, 180 - hue_diff)
+    sat_diff = np.abs(hsv[:, :, 1].astype(float) - bg_s)
+    val_diff = np.abs(hsv[:, :, 2].astype(float) - bg_v)
+
+    card_mask = ((hue_diff > 15) | (sat_diff > 40) | (val_diff > 40)).astype(np.uint8) * 255
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    card_mask = cv2.morphologyEx(card_mask, cv2.MORPH_CLOSE, kernel, iterations=3)
+    card_mask = cv2.morphologyEx(card_mask, cv2.MORPH_OPEN, kernel, iterations=2)
+
+    coords = cv2.findNonZero(card_mask)
+    if coords is None or len(coords) < 100:
+        return None
+
+    bx, by, bw, bh = cv2.boundingRect(coords)
+    if bw < w * 0.5 or bh < h * 0.5:
+        return None
+
+    return (bx, by, bw, bh)
+
+
+def _boundary_quality(rect: tuple, img_w: int, img_h: int) -> float:
+    """外枠検出結果の品質スコア。カードのアスペクト比に近く、適度なサイズが高スコア。"""
+    x, y, rw, rh = rect
+    if rw == 0 or rh == 0:
+        return 0
+
+    # カードのアスペクト比 (0.714) に近いほど高スコア
+    aspect = min(rw, rh) / max(rw, rh)
+    aspect_score = 1.0 - abs(aspect - 0.714) * 3
+
+    # 画像面積の50-95%が理想
+    area_ratio = (rw * rh) / (img_w * img_h)
+    if area_ratio > 0.95:
+        area_score = 0.5  # 画像全体≒背景含む
+    elif area_ratio > 0.5:
+        area_score = 1.0
+    else:
+        area_score = area_ratio * 2
+
+    return aspect_score * area_score
 
 
 # ---------------------------------------------------------------------------
