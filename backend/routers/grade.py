@@ -161,8 +161,8 @@ async def preprocess_image(
         scale = 1200 / max(h, w)
         image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-    # 前処理: カード検出 + 正面化
-    card_data = detect_card(image)
+    # 前処理: カード検出 + 正面化（トリミングなし＝背景を残す）
+    card_data = detect_card(image, trim=False)
     card_image = card_data["card_image"]
 
     # 長辺800pxにリサイズ

@@ -23,15 +23,19 @@ def order_points(pts: np.ndarray) -> np.ndarray:
     return rect
 
 
-def detect_card(image: np.ndarray) -> dict:
+def detect_card(image: np.ndarray, trim: bool = True) -> dict:
     """
-    画像からカード領域を検出し、正面化・トリミングした画像を返す。
+    画像からカード領域を検出し、正面化した画像を返す。
 
     検出パイプライン:
       1. 3手法でカード候補を検出
       2. 最もスコアの高い候補を採用
       3. ホモグラフィ変換で正面化
-      4. 正面化後に余白を再トリミング
+      4. trim=True の場合、正面化後に余白を再トリミング
+
+    Args:
+        image: 入力画像
+        trim: Trueなら余白トリミングを実行、Falseなら正面化のみ
     """
     h, w = image.shape[:2]
 
@@ -82,8 +86,9 @@ def detect_card(image: np.ndarray) -> dict:
     matrix = cv2.getPerspectiveTransform(ordered, dst)
     card_image = cv2.warpPerspective(image, matrix, (max_width, max_height))
 
-    # --- 正面化後の余白トリミング ---
-    card_image = _trim_margins(card_image)
+    # --- 正面化後の余白トリミング（trim=True の場合のみ） ---
+    if trim:
+        card_image = _trim_margins(card_image)
 
     aspect_ratio = card_image.shape[1] / card_image.shape[0]
     card_type = _estimate_card_type(aspect_ratio)
