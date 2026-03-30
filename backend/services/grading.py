@@ -52,7 +52,9 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     image = _resize_if_needed(image, max_side=1200)
 
     # 1. 前処理: カード領域検出
-    card_data = detect_card(image)
+    # 手動センタリング時はトリミングしない（エディターと同じ画像を使う）
+    use_trim = not (manual_centering and "lr_ratio" in manual_centering)
+    card_data = detect_card(image, trim=use_trim)
     card_image = card_data["card_image"]
 
     # カード画像も処理用にリサイズ（長辺800px上限）
