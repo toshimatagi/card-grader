@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { searchCards, listSets } from "../../lib/api";
+import { searchCards, listSets, type CardSummary } from "../../lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +20,12 @@ export default async function CardsPage({
   ]);
 
   // 型番でグループ化（variant別に分かれているため）
-  const grouped = new Map<string, typeof result.items>();
+  const grouped = new Map<string, CardSummary[]>();
   for (const c of result.items) {
     const key = `${c.set_code}-${c.card_no}`;
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(c);
+    const list = grouped.get(key) ?? [];
+    list.push(c);
+    grouped.set(key, list);
   }
 
   return (
