@@ -1,1 +1,65 @@
+  name: crawl-hourly
 
+  on:
+    schedule:
+      # 毎時15分: 直近2セット (hot) のクロール
+      - cron: "15 * * * *"
+    workflow_dispatch:
+      inputs:
+        scope:
+          description: "scope (hot/warm/cold/all)"
+          required: false
+          default: "hot"
+        sets:
+          description: "カンマ区切りのセット指定 (例: OP15,OP14)"
+          required: false
+          default: ""
+
+  concurrency:
+    group: crawl-hourly
+    cancel-in-progress: false
+
+  jobs:
+    yuyutei:
+      runs-on: ubuntu-latest
+      timeout-minutes: 20
+      steps:
+        - uses: actions/checkout@v4
+
+        - uses: actions/setup-python@v5
+          with:
+            python-version: "3.12"
+            cache: "pip"
+            cache-dependency-path: backend/requirements.txt
+
+        - name: Install deps
+          run: |
+            python -m pip install --upgrade pip
+            pip install -r backend/requirements.txt
+
+        - name: Run crawlers (yuyutei + cardrush, onepiece)
+          env:
+            SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+            SUPABASE_SERVICE_KEY: ${{
+  secrets.SUPABASE_SERVICE_KEY }}
+          run: |
+            SCOPE="${{ github.event.inputs.scope || 'hot' }}"
+            SETS="${{ github.event.inputs.sets }}"
+            build_args() {
+              if [ -n "$SETS" ]; then
+                SET_ARGS=""
+                IFS=',' read -ra ARR <<< "$SETS"
+                for s in "${ARR[@]}"; do SET_ARGS="$SET_ARGS
+  --set $s"; done
+                echo "$SET_ARGS"
+              else
+                echo "--scope $SCOPE"
+              fi
+            }
+            ARGS=$(build_args)
+            python -m backend.crawlers.run --source yuyutei
+  --brand onepiece $ARGS || true
+            python -m backend.crawlers.run --source cardrush
+  --brand onepiece $ARGS || true
+
+  ---
