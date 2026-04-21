@@ -27,6 +27,9 @@ export default function RootLayout({
               <a href="/history" className="hover:text-blue-400 transition-colors">
                 履歴
               </a>
+              <a href="/cards" className="hover:text-blue-400 transition-colors">
+                価格DB
+              </a>
               <a href="/guide" className="hover:text-blue-400 transition-colors">
                 使い方
               </a>

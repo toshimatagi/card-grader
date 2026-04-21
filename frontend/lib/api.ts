@@ -149,6 +149,81 @@ export interface EbaySoldResult {
   total: number;
 }
 
+// =============================================================================
+// 価格DB (Price History)
+// =============================================================================
+
+export interface PriceSnapshot {
+  card_id: string;
+  source: string;
+  captured_at: string;
+  price_type: "sell" | "buy";
+  price: number | null;
+  stock_status: string | null;
+}
+
+export interface CardVariant {
+  id: string;
+  brand: string;
+  set_code: string;
+  card_no: string;
+  variant: string;
+  rarity: string;
+  name_ja: string;
+  image_url: string | null;
+  latest_sell_price: number | null;
+  latest_buy_price: number | null;
+  history: PriceSnapshot[];
+}
+
+export interface CardByCodeResult {
+  code: string;
+  cards: CardVariant[];
+}
+
+export interface CardSummary {
+  id: string;
+  brand: string;
+  set_code: string;
+  card_no: string;
+  variant: string;
+  rarity: string;
+  name_ja: string;
+  image_url: string | null;
+}
+
+export async function searchCards(params: {
+  brand?: string;
+  set_code?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: CardSummary[]; count: number }> {
+  const qs = new URLSearchParams();
+  if (params.brand) qs.set("brand", params.brand);
+  if (params.set_code) qs.set("set_code", params.set_code);
+  if (params.q) qs.set("q", params.q);
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.offset) qs.set("offset", String(params.offset));
+  const res = await fetch(`${API_BASE}/api/v1/cards/search?${qs}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("カード検索に失敗しました");
+  return res.json();
+}
+
+export async function getCardByCode(code: string): Promise<CardByCodeResult> {
+  const res = await fetch(`${API_BASE}/api/v1/cards/by-code/${encodeURIComponent(code)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("カード情報の取得に失敗しました");
+  return res.json();
+}
+
+export async function listSets(brand: string = "onepiece"): Promise<{ sets: { set_code: string; count: number }[] }> {
+  const res = await fetch(`${API_BASE}/api/v1/cards/sets?brand=${brand}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("セット一覧の取得に失敗しました");
+  return res.json();
+}
+
 export async function searchEbaySold(
   query: string,
   brand: string = ""

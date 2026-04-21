@@ -5,7 +5,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import grade
+from .routers import cards, grade
 
 app = FastAPI(
     title="Card Grader API",
@@ -29,6 +29,7 @@ app.add_middleware(
 
 # APIルーター
 app.include_router(grade.router)
+app.include_router(cards.router)
 
 
 @app.get("/health")
