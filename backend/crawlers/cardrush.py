@@ -39,6 +39,8 @@ BASE = "https://www.cardrush-op.jp"
 
 _ALT_RE = re.compile(r"(?:〔状態([^〕]+)〕)?(.+?)【([^】]+)】\{([^}]+)\}")  # noqa: W605
 
+MAX_PAGES = 10  # 1ページ=100件、10ページ=1000件まで
+
 
 # トップのアンカーテキストから set_code を抽出: "【OP-15】" or "【ST-30】" or "【P】"
 _LABEL_SET_RE = re.compile(r"【([A-Z]+)[-]?(\d{0,2})】")
@@ -96,8 +98,31 @@ class CardrushScraper(BaseScraper):
         if not gid:
             return []
 
-        url = f"{BASE}/product-group/{gid}"
-        items = self._parse_list((await self.http.get(url)).text, set_url=url)
+        # ページネーション対応: 1ページ=100件、product_idで重複除去
+        items: list[dict] = []
+        seen_pids: set[str] = set()
+        for page in range(1, MAX_PAGES + 1):
+            url = f"{BASE}/product-group/{gid}"
+            if page > 1:
+                url = f"{url}?page={page}"
+            try:
+                page_items = self._parse_list((await self.http.get(url)).text, set_url=url)
+            except Exception:
+                break
+            if not page_items:
+                break
+            new_count = 0
+            for it in page_items:
+                pid = str(it.get("product_id") or "")
+                if pid and pid in seen_pids:
+                    continue
+                seen_pids.add(pid)
+                items.append(it)
+                new_count += 1
+            if new_count == 0:
+                break
+            if len(page_items) < 100:
+                break
 
         # 同じ (set_code, card_no, variant, rarity) でグルーピングして最安を採用
         groups: dict[tuple, list[dict]] = defaultdict(list)
