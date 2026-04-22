@@ -55,5 +55,6 @@ jobs:
             fi
           }
           ARGS=$(build_args)
-          python -m backend.crawlers.run --source cardrush --brand onepiece $ARGS || true
-          python -m backend.crawlers.run --source tierone  --brand onepiece $ARGS || true
+          python -m backend.crawlers.run --source cardrush  --brand onepiece $ARGS || true
+          python -m backend.crawlers.run --source tierone   --brand onepiece $ARGS || true
+          python -m backend.crawlers.run --source fullahead --brand onepiece $ARGS || true
