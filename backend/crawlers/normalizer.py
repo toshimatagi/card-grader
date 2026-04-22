@@ -27,32 +27,32 @@ def parse_card_code(code: str) -> tuple[str, str] | None:
     return set_code, card_no.zfill(3)
 
 
-# 遊々亭のレアリティラベル → (rarity, variant)
-_YUYUTEI_RARITY_MAP: dict[str, tuple[str, str]] = {
-    "C": ("C", "normal"),
-    "UC": ("UC", "normal"),
-    "R": ("R", "normal"),
-    "SR": ("SR", "normal"),
-    "SEC": ("SEC", "normal"),
-    "L": ("L", "normal"),
-    "SP": ("SP", "normal"),
-    "P": ("P", "normal"),         # プロモの Promo
-    "P-C": ("C", "parallel"),
-    "P-UC": ("UC", "parallel"),
-    "P-R": ("R", "parallel"),
-    "P-SR": ("SR", "parallel"),
-    "P-SEC": ("SEC", "parallel"),
-    "P-L": ("L", "parallel"),
-    "P-SP": ("SP", "parallel"),
-    "P-P": ("P", "parallel"),
-    "-": ("DON", "normal"),       # ドン!!カード
-}
+_BASE_RARITIES = {"C", "UC", "R", "SR", "SEC", "L", "SP", "P"}
 
 
 def normalize_yuyutei_rarity(label: str) -> tuple[str, str]:
-    """遊々亭のレアリティ表記を (rarity, variant) に。未知は ('other','other')"""
+    """各サイトのレアリティ表記を (rarity, variant) に正規化。
+    対応形式:
+      - 'SR', 'SEC', 'L', 'P'  → (X, 'normal')
+      - 'P-SR', 'P-SEC' (遊々亭・ティアワン形式) → (X, 'parallel')
+      - 'SR/P', 'SEC/P' (カードラッシュ形式)     → (X, 'parallel')
+      - '-' ドン!!カード → ('DON', 'normal')
+    未知は ('OTHER', 'other')
+    """
     key = label.strip().upper()
-    return _YUYUTEI_RARITY_MAP.get(key, ("OTHER", "other"))
+    if key == "-":
+        return ("DON", "normal")
+    if key.startswith("P-"):
+        base = key[2:]
+        if base in _BASE_RARITIES:
+            return (base, "parallel")
+    if key.endswith("/P"):
+        base = key[:-2]
+        if base in _BASE_RARITIES:
+            return (base, "parallel")
+    if key in _BASE_RARITIES:
+        return (key, "normal")
+    return ("OTHER", "other")
 
 
 def detect_variant_from_name(name: str, base_variant: str) -> str:
