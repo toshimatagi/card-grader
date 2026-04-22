@@ -26,6 +26,7 @@ import httpx
 from .base import BaseScraper, CrawledCard
 from .storage import finish_run, save_crawled, start_run
 from .cardrush import CardrushScraper
+from .fullahead import FullaheadScraper
 from .tierone import TieroneScraper
 from .yuyutei import YuyuteiScraper
 
@@ -33,6 +34,7 @@ SCRAPERS: dict[str, type[BaseScraper]] = {
     "yuyutei": YuyuteiScraper,
     "cardrush": CardrushScraper,
     "tierone": TieroneScraper,
+    "fullahead": FullaheadScraper,
 }
 
 
