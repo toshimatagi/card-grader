@@ -38,17 +38,28 @@ SCRAPERS: dict[str, type[BaseScraper]] = {
 }
 
 
+import re as _re
+_OP_RE = _re.compile(r"^OP\d+$")
+_EB_RE = _re.compile(r"^EB\d+$")
+
+
 def _select_sets(all_sets: list[str], scope: str) -> list[str]:
     if not all_sets:
         return []
     if scope == "all":
         return all_sets
+    op_sets = sorted([s for s in all_sets if _OP_RE.match(s)])
     if scope == "hot":
-        return all_sets[-2:]  # OP14, OP15 相当
+        return op_sets[-2:]  # 最新2つの通常ブースター
     if scope == "warm":
-        return [s for s in all_sets[:-2] if s.startswith(("OP", "EB"))]
+        if len(op_sets) >= 2:
+            op_warm = op_sets[:-2]
+        else:
+            op_warm = []
+        eb_sets = sorted([s for s in all_sets if _EB_RE.match(s)])
+        return op_warm + eb_sets
     if scope == "cold":
-        return [s for s in all_sets[:-2] if not s.startswith(("OP", "EB"))]
+        return [s for s in all_sets if not (_OP_RE.match(s) or _EB_RE.match(s))]
     return all_sets
 
 
