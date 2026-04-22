@@ -36,3 +36,4 @@ jobs:
           python -m backend.crawlers.run --source cardrush  --brand onepiece --scope all || true
           python -m backend.crawlers.run --source tierone   --brand onepiece --scope all || true
           python -m backend.crawlers.run --source fullahead --brand onepiece --scope all || true
+          python -m backend.crawlers.run --source toretoku  --brand onepiece --scope all || true
