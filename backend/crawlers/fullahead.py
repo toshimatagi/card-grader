@@ -75,9 +75,10 @@ class FullaheadScraper(BaseScraper):
             html = ""
 
         found: set[str] = set()
-        for m in re.finditer(r"/view/category/opc-([a-z0-9]+)", html):
+        for m in re.finditer(r"/(?:view/category|shopbrand)/opc-([a-z0-9]+)", html):
             code = m.group(1).upper()
-            if re.match(r"^[A-Z]+\d+$", code):
+            # OP/ST/EB/PRB のみ受容 (ATTRIBUTE, TYPE 等は除外)
+            if re.match(r"^(OP|ST|EB|PRB)\d+$", code):
                 found.add(code)
 
         if found:
