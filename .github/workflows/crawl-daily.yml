@@ -33,5 +33,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          python -m backend.crawlers.run --source yuyutei  --brand onepiece --scope all || true
           python -m backend.crawlers.run --source cardrush --brand onepiece --scope all || true
+          python -m backend.crawlers.run --source tierone  --brand onepiece --scope all || true
