@@ -1,0 +1,24 @@
+name: keepalive
+
+on:
+  schedule:
+    # 5分おきに /health を叩いて Render Free のスリープを防ぐ
+    # GitHub Actions cron は実際は遅延することがあり、平均7-10分間隔になる想定
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Render /health
+        run: |
+          for url in "https://card-grader-api-tkae.onrender.com/health"; do
+            code=$(curl -s -o /dev/null -m 60 -w "%{http_code} | %{time_total}s" "$url")
+            echo "$code | $url"
+          done
