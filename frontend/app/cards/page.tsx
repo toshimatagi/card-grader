@@ -32,7 +32,7 @@ export default async function CardsPage({
     <div>
       <h1 className="text-2xl font-bold mb-2">ONE PIECE カード価格DB</h1>
       <p className="text-sm text-gray-600 mb-6">
-        各型番のバリアント別価格推移を閲覧できます。現在のソース: 遊々亭
+        各型番のバリアント別価格推移を閲覧できます。
       </p>
 
       <form className="mb-6 flex gap-2 flex-wrap" action="/cards" method="GET">
