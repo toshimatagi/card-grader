@@ -192,6 +192,8 @@ export interface CardSummary {
   image_url: string | null;
 }
 
+import { sbGet } from "./supabase";
+
 export async function searchCards(params: {
   brand?: string;
   set_code?: string;
@@ -199,29 +201,87 @@ export async function searchCards(params: {
   limit?: number;
   offset?: number;
 }): Promise<{ items: CardSummary[]; count: number }> {
-  const qs = new URLSearchParams();
-  if (params.brand) qs.set("brand", params.brand);
-  if (params.set_code) qs.set("set_code", params.set_code);
-  if (params.q) qs.set("q", params.q);
-  if (params.limit) qs.set("limit", String(params.limit));
-  if (params.offset) qs.set("offset", String(params.offset));
-  const res = await fetch(`${API_BASE}/api/v1/cards/search?${qs}`, { cache: "no-store" });
-  if (!res.ok) throw new Error("カード検索に失敗しました");
-  return res.json();
+  const brand = params.brand ?? "onepiece";
+  const limit = params.limit ?? 50;
+  const offset = params.offset ?? 0;
+
+  const filters = [`brand=eq.${brand}`];
+  if (params.set_code) filters.push(`set_code=eq.${params.set_code.toUpperCase()}`);
+  if (params.q) filters.push(`name_ja=ilike.*${params.q}*`);
+
+  const select = "id,brand,set_code,card_no,variant,rarity,name_ja,image_url";
+  const qs =
+    filters.join("&") +
+    `&select=${select}` +
+    `&order=set_code.asc,card_no.asc,variant.asc` +
+    `&limit=${limit}&offset=${offset}`;
+
+  const items = await sbGet<CardSummary[]>("cards", qs);
+  return { items, count: items.length };
 }
 
 export async function getCardByCode(code: string): Promise<CardByCodeResult> {
-  const res = await fetch(`${API_BASE}/api/v1/cards/by-code/${encodeURIComponent(code)}`, {
-    cache: "no-store",
+  const codeU = code.toUpperCase().replace(/\s+/g, "");
+  if (!codeU.includes("-")) {
+    throw new Error("型番は 'OP15-007' の形式で指定してください");
+  }
+  const [setCode, rawCardNo] = codeU.split("-", 2);
+  const cardNo = rawCardNo.padStart(3, "0");
+
+  const cardSelect = "id,brand,set_code,card_no,variant,rarity,name_ja,image_url";
+  const cards = await sbGet<CardSummary[]>(
+    "cards",
+    `set_code=eq.${setCode}&card_no=eq.${cardNo}&select=${cardSelect}&order=variant.asc,rarity.asc`
+  );
+  if (cards.length === 0) {
+    throw new Error(`${codeU} が見つかりません`);
+  }
+
+  const ids = cards.map((c) => c.id).join(",");
+  const snapSelect = "card_id,source,captured_at,price_type,price,stock_status";
+  const snapshots = await sbGet<PriceSnapshot[]>(
+    "price_snapshots",
+    `card_id=in.(${ids})&select=${snapSelect}&order=captured_at.asc&limit=10000`
+  );
+
+  const byCard = new Map<string, PriceSnapshot[]>();
+  for (const c of cards) byCard.set(c.id, []);
+  for (const s of snapshots) {
+    const list = byCard.get(s.card_id) ?? [];
+    list.push(s);
+    byCard.set(s.card_id, list);
+  }
+
+  const resultCards: CardVariant[] = cards.map((c) => {
+    const history = byCard.get(c.id) ?? [];
+    const latestSell = [...history]
+      .reverse()
+      .find((h) => h.price_type === "sell" && h.price != null);
+    const latestBuy = [...history]
+      .reverse()
+      .find((h) => h.price_type === "buy" && h.price != null);
+    return {
+      ...c,
+      latest_sell_price: latestSell?.price ?? null,
+      latest_buy_price: latestBuy?.price ?? null,
+      history,
+    };
   });
-  if (!res.ok) throw new Error("カード情報の取得に失敗しました");
-  return res.json();
+
+  return { code: `${setCode}-${cardNo}`, cards: resultCards };
 }
 
 export async function listSets(brand: string = "onepiece"): Promise<{ sets: { set_code: string; count: number }[] }> {
-  const res = await fetch(`${API_BASE}/api/v1/cards/sets?brand=${brand}`, { cache: "no-store" });
-  if (!res.ok) throw new Error("セット一覧の取得に失敗しました");
-  return res.json();
+  const items = await sbGet<{ set_code: string }[]>(
+    "cards",
+    `brand=eq.${brand}&select=set_code&limit=100000`
+  );
+  const counts: Record<string, number> = {};
+  for (const it of items) counts[it.set_code] = (counts[it.set_code] ?? 0) + 1;
+  const sets = Object.entries(counts)
+    .map(([set_code, count]) => ({ set_code, count }))
+    .sort((a, b) => a.set_code.localeCompare(b.set_code));
+  return { sets };
 }
 
 export async function searchEbaySold(
