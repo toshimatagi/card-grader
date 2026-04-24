@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { searchCards, listSets, type CardSummary } from "../../lib/api";
+import { CardsFilterForm } from "../../components/cards/CardsFilterForm";
 
 export const dynamic = "force-dynamic";
 
@@ -35,32 +36,11 @@ export default async function CardsPage({
         各型番のバリアント別価格推移を閲覧できます。
       </p>
 
-      <form className="mb-6 flex gap-2 flex-wrap" action="/cards" method="GET">
-        <select
-          name="set"
-          defaultValue={sp.set ?? ""}
-          className="border px-3 py-2 rounded"
-        >
-          <option value="">全セット</option>
-          {sets.sets.map((s) => (
-            <option key={s.set_code} value={s.set_code}>
-              {s.set_code} ({s.count})
-            </option>
-          ))}
-        </select>
-        <input
-          name="q"
-          defaultValue={sp.q ?? ""}
-          placeholder="カード名で検索"
-          className="border px-3 py-2 rounded flex-1 min-w-[200px]"
-        />
-        <button
-          type="submit"
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          検索
-        </button>
-      </form>
+      <CardsFilterForm
+        sets={sets.sets}
+        initialSet={sp.set ?? ""}
+        initialQ={sp.q ?? ""}
+      />
 
       {grouped.size === 0 ? (
         <p className="text-gray-500">
