@@ -55,16 +55,27 @@ def normalize_yuyutei_rarity(label: str) -> tuple[str, str]:
     return ("OTHER", "other")
 
 
+_PAREN_RE = re.compile(r"[（(]([^）)]+)[)）]")
+
+
 def detect_variant_from_name(name: str, base_variant: str) -> str:
-    """カード名に「(パラレル)」「(スーパーパラレル)」等が含まれる場合、variantを上書き"""
+    """カード名に「(パラレル)」「(スーパーパラレル)」等が含まれる場合、variantを上書き。
+
+    既知パターンに一致しない括弧内テキストがある場合は 'other' を返す
+    (例: '(金文字/アニメイラスト)' '(優勝記念)' などの特殊版を normal に
+    取り込まないようにするため)。
+    """
     if "スーパーパラレル" in name:
         return "super_parallel"
     if "パラレル" in name:
         return "parallel"
-    if "マンガ" in name:
+    if "マンガ" in name or "漫画" in name:
         return "manga"
     if "アルトアート" in name or "オルトアート" in name:
         return "alt_art"
+    m = _PAREN_RE.search(name)
+    if m and m.group(1).strip():
+        return "other"
     return base_variant
 
 

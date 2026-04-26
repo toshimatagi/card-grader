@@ -171,8 +171,8 @@ export interface CardVariant {
   rarity: string;
   name_ja: string;
   image_url: string | null;
-  latest_sell_price: number | null;
-  latest_buy_price: number | null;
+  sell_price: number | null;
+  buy_price: number | null;
   history: PriceSnapshot[];
 }
 
@@ -244,31 +244,92 @@ export async function getCardByCode(code: string): Promise<CardByCodeResult> {
     `card_id=in.(${ids})&select=${snapSelect}&order=captured_at.asc&limit=10000`
   );
 
+  const PRICE_FLOOR = 10;
+  const validSnapshots = snapshots.filter(
+    (s) =>
+      s.price != null &&
+      s.price >= PRICE_FLOOR &&
+      s.stock_status !== "out_of_stock"
+  );
+
   const byCard = new Map<string, PriceSnapshot[]>();
   for (const c of cards) byCard.set(c.id, []);
-  for (const s of snapshots) {
-    const list = byCard.get(s.card_id) ?? [];
-    list.push(s);
-    byCard.set(s.card_id, list);
+  for (const s of validSnapshots) {
+    byCard.get(s.card_id)?.push(s);
   }
 
   const resultCards: CardVariant[] = cards.map((c) => {
-    const history = byCard.get(c.id) ?? [];
-    const latestSell = [...history]
-      .reverse()
-      .find((h) => h.price_type === "sell" && h.price != null);
-    const latestBuy = [...history]
-      .reverse()
-      .find((h) => h.price_type === "buy" && h.price != null);
+    const all = byCard.get(c.id) ?? [];
     return {
       ...c,
-      latest_sell_price: latestSell?.price ?? null,
-      latest_buy_price: latestBuy?.price ?? null,
-      history,
+      sell_price: latestPerSourceAggregate(all, "sell"),
+      buy_price: latestPerSourceAggregate(all, "buy"),
+      history: [
+        ...dailyAggregateSeries(c.id, all, "sell"),
+        ...dailyAggregateSeries(c.id, all, "buy"),
+      ],
     };
   });
 
   return { code: `${setCode}-${cardNo}`, cards: resultCards };
+}
+
+function aggregate(values: number[]): number | null {
+  if (values.length === 0) return null;
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return Math.round((values[0] + values[1]) / 2);
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+    : sorted[mid];
+}
+
+function latestPerSourceAggregate(
+  snapshots: PriceSnapshot[],
+  priceType: "sell" | "buy"
+): number | null {
+  const bySource = new Map<string, PriceSnapshot>();
+  for (const s of snapshots) {
+    if (s.price_type !== priceType) continue;
+    const cur = bySource.get(s.source);
+    if (!cur || s.captured_at > cur.captured_at) bySource.set(s.source, s);
+  }
+  return aggregate(Array.from(bySource.values(), (s) => s.price as number));
+}
+
+function dailyAggregateSeries(
+  cardId: string,
+  snapshots: PriceSnapshot[],
+  priceType: "sell" | "buy"
+): PriceSnapshot[] {
+  const byDay = new Map<string, Map<string, PriceSnapshot>>();
+  for (const s of snapshots) {
+    if (s.price_type !== priceType) continue;
+    const day = s.captured_at.slice(0, 10);
+    let sources = byDay.get(day);
+    if (!sources) {
+      sources = new Map();
+      byDay.set(day, sources);
+    }
+    const cur = sources.get(s.source);
+    if (!cur || s.captured_at > cur.captured_at) sources.set(s.source, s);
+  }
+  const points: PriceSnapshot[] = [];
+  byDay.forEach((sources, day) => {
+    const agg = aggregate(Array.from(sources.values(), (s) => s.price as number));
+    if (agg != null) {
+      points.push({
+        card_id: cardId,
+        source: "",
+        captured_at: `${day}T00:00:00Z`,
+        price_type: priceType,
+        price: agg,
+        stock_status: null,
+      });
+    }
+  });
+  return points.sort((a, b) => a.captured_at.localeCompare(b.captured_at));
 }
 
 export async function listSets(brand: string = "onepiece"): Promise<{ sets: { set_code: string; count: number }[] }> {

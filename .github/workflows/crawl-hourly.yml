@@ -59,3 +59,4 @@ jobs:
           python -m backend.crawlers.run --source tierone   --brand onepiece $ARGS || true
           python -m backend.crawlers.run --source fullahead --brand onepiece $ARGS || true
           python -m backend.crawlers.run --source toretoku  --brand onepiece $ARGS || true
+          python -m backend.crawlers.run --source raftel    --brand onepiece $ARGS || true

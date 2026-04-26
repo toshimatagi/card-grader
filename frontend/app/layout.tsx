@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import GoogleAnalytics from "../components/GoogleAnalytics";
+import AdSense from "../components/AdSense";
 
 export const metadata: Metadata = {
   title: "Card Grader - TCG鑑定士",
@@ -13,6 +15,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
+      <head>
+        <AdSense />
+      </head>
+      <GoogleAnalytics />
       <body>
         <header className="bg-gray-900 text-white">
           <nav className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">

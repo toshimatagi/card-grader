@@ -68,14 +68,14 @@ export default async function CardDetailPage({
         </div>
 
         <div>
-          <h2 className="font-bold mb-2">バリアント別 最新価格</h2>
+          <h2 className="font-bold mb-2">バリアント別 価格</h2>
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="bg-gray-100 text-left">
                 <th className="p-2 border-b">バリアント</th>
                 <th className="p-2 border-b">レアリティ</th>
-                <th className="p-2 border-b text-right">販売</th>
-                <th className="p-2 border-b text-right">買取</th>
+                <th className="p-2 border-b text-right">販売価格</th>
+                <th className="p-2 border-b text-right">買取価格</th>
               </tr>
             </thead>
             <tbody>
@@ -90,19 +90,22 @@ export default async function CardDetailPage({
                   </td>
                   <td className="p-2">{c.rarity}</td>
                   <td className="p-2 text-right">
-                    {c.latest_sell_price != null
-                      ? `¥${c.latest_sell_price.toLocaleString()}`
+                    {c.sell_price != null
+                      ? `¥${c.sell_price.toLocaleString()}`
                       : "-"}
                   </td>
                   <td className="p-2 text-right">
-                    {c.latest_buy_price != null
-                      ? `¥${c.latest_buy_price.toLocaleString()}`
+                    {c.buy_price != null
+                      ? `¥${c.buy_price.toLocaleString()}`
                       : "-"}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <p className="text-xs text-gray-500 mt-2">
+            ※ 複数の取扱いサイトから集計した中央値を表示しています
+          </p>
         </div>
       </div>
 
