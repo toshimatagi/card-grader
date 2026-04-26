@@ -4,15 +4,13 @@ import cv2
 import numpy as np
 
 
-def analyze_surface(card_image: np.ndarray) -> dict:
+def analyze_surface(card_image: np.ndarray, is_holo: bool = False) -> dict:
     """
     カード表面の傷・ダメージを検出する。
 
-    検出対象:
-    - スクラッチ（線状の傷）
-    - ホワイトニング（白化）
-    - 折れ・クリース
-    - 角のダメージ
+    Args:
+        card_image: BGR形式のカード画像
+        is_holo: ホロカードかどうか (True なら検出閾値を緩める)
 
     Returns:
         dict: スコアと詳細データ
@@ -20,23 +18,14 @@ def analyze_surface(card_image: np.ndarray) -> dict:
     h, w = card_image.shape[:2]
     gray = cv2.cvtColor(card_image, cv2.COLOR_BGR2GRAY)
 
+    # ホロカードはパターンノイズが多いので閾値を緩める
+    sens = 1.5 if is_holo else 1.0
+
     defects = []
-
-    # 1. スクラッチ検出
-    scratches = _detect_scratches(gray)
-    defects.extend(scratches)
-
-    # 2. ホワイトニング検出
-    whitening = _detect_whitening(card_image, gray)
-    defects.extend(whitening)
-
-    # 3. 折れ・クリース検出
-    creases = _detect_creases(gray)
-    defects.extend(creases)
-
-    # 4. 角のダメージ検出
-    corner_damage = _detect_corner_damage(gray)
-    defects.extend(corner_damage)
+    defects.extend(_detect_scratches(gray, sens))
+    defects.extend(_detect_whitening(card_image, gray, sens))
+    defects.extend(_detect_creases(gray, sens))
+    defects.extend(_detect_corner_damage(gray, sens))
 
     # スコア算出
     score = _calculate_score(defects)
@@ -68,49 +57,49 @@ def analyze_surface(card_image: np.ndarray) -> dict:
     }
 
 
-def _detect_scratches(gray: np.ndarray) -> list:
-    """線状の傷（スクラッチ）を検出"""
+def _detect_scratches(gray: np.ndarray, sens: float = 1.0) -> list:
+    """線状の傷（スクラッチ）を検出。sens > 1 で許容を緩める。"""
     h, w = gray.shape
     defects = []
 
     # ガウシアンブラーでノイズ除去
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-    # 元画像との差分で微細な構造を抽出
     diff = cv2.absdiff(gray, blurred)
 
-    # 閾値処理
-    _, thresh = cv2.threshold(diff, 15, 255, cv2.THRESH_BINARY)
+    # 閾値処理 (sens で緩めると印刷パターンを拾わない)
+    diff_thresh = int(28 * sens)
+    _, thresh = cv2.threshold(diff, diff_thresh, 255, cv2.THRESH_BINARY)
 
-    # モルフォロジー処理でノイズ除去
     kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_open)
 
-    # 線状構造の強調（水平・垂直・斜め方向のカーネル）
     kernels = [
-        cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1)),  # 水平
-        cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15)),  # 垂直
+        cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1)),
+        cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15)),
     ]
-
     scratch_mask = np.zeros_like(gray)
     for kernel in kernels:
         detected = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel)
         scratch_mask = cv2.bitwise_or(scratch_mask, detected)
 
-    # 輪郭抽出
     contours, _ = cv2.findContours(scratch_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    min_area = int(60 * sens)        # 元: 20 → 大幅に緩和
+    main_min_area = int(120 * sens)  # 元: 30
+    minor_thresh = int(400 * sens)   # 元: 200
+    major_thresh = int(1500 * sens)  # 元: 1000 (critical 境界)
 
     for contour in contours:
         area = cv2.contourArea(contour)
-        if area < 20:  # 小さすぎるものは無視
+        if area < min_area:
             continue
 
         x, y, cw, ch = cv2.boundingRect(contour)
         aspect = max(cw, ch) / max(min(cw, ch), 1)
 
-        # 線状（アスペクト比が高い）のものをスクラッチと判定
-        if aspect > 3 and area > 30:
-            severity = "minor" if area < 200 else ("major" if area < 1000 else "critical")
+        # 線状: アスペクト比 4 以上 + 一定面積 (元: 3, 30)
+        if aspect > 4 and area > main_min_area:
+            severity = "minor" if area < minor_thresh else ("major" if area < major_thresh else "critical")
             defects.append({
                 "type": "scratch",
                 "severity": severity,
@@ -122,13 +111,13 @@ def _detect_scratches(gray: np.ndarray) -> list:
     return defects
 
 
-def _detect_whitening(color_image: np.ndarray, gray: np.ndarray) -> list:
+def _detect_whitening(color_image: np.ndarray, gray: np.ndarray, sens: float = 1.0) -> list:
     """エッジや角のホワイトニング（白化）を検出"""
     h, w = gray.shape
     defects = []
 
-    # カードの端のみをチェック（ボーダー領域10%）
-    margin = int(min(h, w) * 0.1)
+    # カードのごく端のみ (元: 10% → 6%)
+    margin = int(min(h, w) * 0.06)
 
     regions = {
         "top_edge": gray[:margin, :],
@@ -137,12 +126,14 @@ def _detect_whitening(color_image: np.ndarray, gray: np.ndarray) -> list:
         "right_edge": gray[:, w-margin:],
     }
 
-    for name, region in regions.items():
-        # 明るすぎるピクセルの割合
-        bright_pixels = np.sum(region > 230) / max(region.size, 1)
+    bright_thresh = 240          # 元: 230
+    minor_ratio = 0.25 * sens    # 元: 0.15
+    major_ratio = 0.45 * sens    # 元: 0.30
 
-        if bright_pixels > 0.15:  # 15%以上が白い場合
-            severity = "minor" if bright_pixels < 0.3 else "major"
+    for name, region in regions.items():
+        bright_pixels = np.sum(region > bright_thresh) / max(region.size, 1)
+        if bright_pixels > minor_ratio:
+            severity = "minor" if bright_pixels < major_ratio else "major"
             defects.append({
                 "type": "whitening",
                 "severity": severity,
@@ -153,51 +144,50 @@ def _detect_whitening(color_image: np.ndarray, gray: np.ndarray) -> list:
     return defects
 
 
-def _detect_creases(gray: np.ndarray) -> list:
+def _detect_creases(gray: np.ndarray, sens: float = 1.0) -> list:
     """折れ・クリースを検出"""
     h, w = gray.shape
     defects = []
 
-    # ラプラシアンフィルタで急激な明度変化を検出
     laplacian = cv2.Laplacian(gray, cv2.CV_64F)
     abs_laplacian = np.abs(laplacian)
 
-    # 強いエッジを閾値処理
-    threshold = np.mean(abs_laplacian) + 4 * np.std(abs_laplacian)
-    _, strong_edges = cv2.threshold(abs_laplacian.astype(np.uint8),
-                                     int(min(threshold, 255)), 255, cv2.THRESH_BINARY)
+    # mean + 4σ → mean + 6σ (印刷パターンを拾いにくく)
+    threshold = np.mean(abs_laplacian) + 6 * sens * np.std(abs_laplacian)
+    _, strong_edges = cv2.threshold(
+        abs_laplacian.astype(np.uint8), int(min(threshold, 255)), 255, cv2.THRESH_BINARY
+    )
 
-    # 長い直線状のエッジを検出（Hough変換）
-    lines = cv2.HoughLinesP(strong_edges, 1, np.pi/180, threshold=50,
-                            minLineLength=int(min(h, w) * 0.15),
-                            maxLineGap=10)
+    # minLineLength を 15% → 25% (短い線をクリースと誤認しない)
+    lines = cv2.HoughLinesP(
+        strong_edges, 1, np.pi/180, threshold=80,
+        minLineLength=int(min(h, w) * 0.25),
+        maxLineGap=10,
+    )
 
     if lines is not None:
+        # 中央エリア除外マージンを 12% → 18%
+        margin = int(min(h, w) * 0.18)
         for line in lines:
             x1, y1, x2, y2 = line[0]
             length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-
-            # ボーダー付近の線は無視（カード枠の検出を避ける）
-            margin = int(min(h, w) * 0.12)
             mid_x = (x1 + x2) / 2
             mid_y = (y1 + y2) / 2
-
-            if (margin < mid_x < w - margin and margin < mid_y < h - margin):
-                severity = "major" if length > min(h, w) * 0.3 else "minor"
+            if margin < mid_x < w - margin and margin < mid_y < h - margin:
+                severity = "major" if length > min(h, w) * 0.4 else "minor"
                 defects.append({
                     "type": "crease",
                     "severity": severity,
                     "location": _location_label(int(mid_x), int(mid_y), w, h),
-                    "bbox": (min(x1, x2), min(y1, y2),
-                             abs(x2-x1), abs(y2-y1)),
+                    "bbox": (min(x1, x2), min(y1, y2), abs(x2-x1), abs(y2-y1)),
                     "area": int(length * 2),
                 })
 
     return defects
 
 
-def _detect_corner_damage(gray: np.ndarray) -> list:
-    """4角のダメージを検出"""
+def _detect_corner_damage(gray: np.ndarray, sens: float = 1.0) -> list:
+    """4角のダメージを検出 (surface側、edges.py の corner damage と二重評価になっているので緩めに)"""
     h, w = gray.shape
     defects = []
 
@@ -210,21 +200,17 @@ def _detect_corner_damage(gray: np.ndarray) -> list:
         "bottom-right": gray[h-corner_size:, w-corner_size:],
     }
 
+    edge_thresh = 0.25 * sens   # 元: 0.15
+    std_thresh = 60 * sens      # 元: 40
+    major_std = 85 * sens       # 元: 60
+
     for name, region in corners.items():
-        # エッジの強さを計測
         edges = cv2.Canny(region, 50, 150)
         edge_density = np.sum(edges > 0) / max(edges.size, 1)
-
-        # 角が丸まっているか、ダメージがあると
-        # エッジの分布が不規則になる
-        # 正常な角: 2辺のエッジがL字型
-        # ダメージ角: エッジが散在
-
-        # テクスチャの乱れ度合い
         std_dev = np.std(region.astype(float))
 
-        if edge_density > 0.15 and std_dev > 40:
-            severity = "minor" if std_dev < 60 else "major"
+        if edge_density > edge_thresh and std_dev > std_thresh:
+            severity = "minor" if std_dev < major_std else "major"
             defects.append({
                 "type": "corner_damage",
                 "severity": severity,
@@ -243,21 +229,31 @@ def _location_label(x: int, y: int, w: int, h: int) -> str:
 
 
 def _calculate_score(defects: list) -> float:
-    """傷の数と深刻度からスコアを算出"""
+    """傷の数と深刻度からスコアを算出 (再キャリブレーション後)"""
     if not defects:
         return 10.0
 
-    penalty = 0.0
+    # 元: critical=3.0 / major=1.5 / minor=0.5 → 多発時に floor=1 に張り付くので大幅減衰
+    weights = {"critical": 1.2, "major": 0.6, "minor": 0.2}
+    counts = {"critical": 0, "major": 0, "minor": 0}
     for d in defects:
-        if d["severity"] == "critical":
-            penalty += 3.0
-        elif d["severity"] == "major":
-            penalty += 1.5
-        elif d["severity"] == "minor":
-            penalty += 0.5
+        sev = d.get("severity", "minor")
+        if sev in counts:
+            counts[sev] += 1
 
+    # 各深刻度ごとに先頭の n 個までは満額、それ以降は逓減 (印刷パターン誤検出のスタックを防ぐ)
+    def diminishing(n: int, w: float, full: int) -> float:
+        if n <= full:
+            return n * w
+        return full * w + (n - full) * w * 0.3
+
+    penalty = (
+        diminishing(counts["critical"], weights["critical"], full=2)
+        + diminishing(counts["major"], weights["major"], full=3)
+        + diminishing(counts["minor"], weights["minor"], full=5)
+    )
     score = max(1.0, 10.0 - penalty)
-    return round(score * 2) / 2  # 0.5刻み
+    return round(score * 2) / 2
 
 
 def _overall_severity(defects: list) -> str:

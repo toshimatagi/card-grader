@@ -72,14 +72,15 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     border_ratios = get_border_ratios(brand) if brand else None
 
     # 2. 各分析を実行
-    # 手動センタリングが指定されている場合はそれを使用
     if manual_centering and "lr_ratio" in manual_centering:
         centering_result = _build_manual_centering_result(manual_centering, card_image)
     else:
         centering_result = analyze_centering(card_image, mode=centering_mode, border_ratios=border_ratios)
-    surface_result = analyze_surface(card_image)
+    # color を先に走らせて is_holo を取得し、surface/edges に渡してホロ用に閾値を緩める
     color_result = analyze_color(card_image)
-    edges_result = analyze_edges(card_image)
+    is_holo = bool(color_result.get("detail", {}).get("is_holo"))
+    surface_result = analyze_surface(card_image, is_holo=is_holo)
+    edges_result = analyze_edges(card_image, is_holo=is_holo)
 
     # 3. 総合スコア算出
     sub_scores = {

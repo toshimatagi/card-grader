@@ -4,29 +4,21 @@ import cv2
 import numpy as np
 
 
-def analyze_edges(card_image: np.ndarray) -> dict:
+def analyze_edges(card_image: np.ndarray, is_holo: bool = False) -> dict:
     """
     カードのエッジ（辺）と角の品質を分析する。
 
-    検出対象:
-    - エッジの直線性
-    - 角の丸みの均一性
-    - 角のダメージ・摩耗
-
-    Returns:
-        dict: スコアと詳細データ
+    Args:
+        card_image: BGR
+        is_holo: ホロカードなら検出を緩める
     """
     h, w = card_image.shape[:2]
     gray = cv2.cvtColor(card_image, cv2.COLOR_BGR2GRAY)
+    sens = 1.4 if is_holo else 1.0
 
-    # 1. エッジの直線性分析
     edge_straightness = _analyze_edge_straightness(gray)
-
-    # 2. 角の丸み均一性
     corner_uniformity = _analyze_corner_roundness(gray)
-
-    # 3. 角の個別ダメージ評価
-    corner_damages = _evaluate_corners(gray)
+    corner_damages = _evaluate_corners(gray, sens)
 
     # スコア算出
     score = _calculate_score(edge_straightness, corner_uniformity, corner_damages)
@@ -164,8 +156,8 @@ def _analyze_corner_roundness(gray: np.ndarray) -> float:
     return min(uniformity, 1.0)
 
 
-def _evaluate_corners(gray: np.ndarray) -> list:
-    """4角を個別に評価してダメージを検出"""
+def _evaluate_corners(gray: np.ndarray, sens: float = 1.0) -> list:
+    """4角を個別に評価してダメージを検出 (再キャリブレーション後)"""
     h, w = gray.shape
     corner_size = int(min(h, w) * 0.1)
 
@@ -178,36 +170,33 @@ def _evaluate_corners(gray: np.ndarray) -> list:
 
     damages = []
 
+    # 各しきい値を sens で緩和。下限を上げ、ダメージ判定の発火率を下げる。
+    lap_base = 50 * sens     # 元: 30
+    edge_base = 0.20 * sens  # 元: 0.12
+    int_base = 70 * sens     # 元: 50
+    minor_thresh = 0.55      # 元: 0.30
+    major_thresh = 0.85      # 元: 0.60
+
     for name, (y1, x1, y2, x2) in corner_regions.items():
         region = gray[y1:y2, x1:x2]
 
-        # テクスチャ解析
         laplacian = cv2.Laplacian(region, cv2.CV_64F)
-        lap_std = np.std(laplacian)
-
-        # エッジ密度
+        lap_std = float(np.std(laplacian))
         edges = cv2.Canny(region, 50, 150)
-        edge_density = np.sum(edges > 0) / max(edges.size, 1)
-
-        # 明度のばらつき
-        intensity_std = np.std(region.astype(float))
-
-        # ダメージ判定
-        # 正常な角: 適度なエッジ（L字の角）、低いテクスチャ変化
-        # ダメージ角: 高いテクスチャ変化、不規則なエッジ
+        edge_density = float(np.sum(edges > 0)) / max(edges.size, 1)
+        intensity_std = float(np.std(region.astype(float)))
 
         damage_score = 0.0
-        if lap_std > 30:
-            damage_score += (lap_std - 30) / 50
-        if edge_density > 0.12:
-            damage_score += (edge_density - 0.12) / 0.1
-        if intensity_std > 50:
-            damage_score += (intensity_std - 50) / 50
-
+        if lap_std > lap_base:
+            damage_score += (lap_std - lap_base) / 80
+        if edge_density > edge_base:
+            damage_score += (edge_density - edge_base) / 0.15
+        if intensity_std > int_base:
+            damage_score += (intensity_std - int_base) / 80
         damage_score = min(damage_score, 1.0)
 
-        if damage_score > 0.3:
-            severity = "minor" if damage_score < 0.6 else "major"
+        if damage_score > minor_thresh:
+            severity = "minor" if damage_score < major_thresh else "major"
             damages.append({
                 "corner": name,
                 "severity": severity,
@@ -219,26 +208,18 @@ def _evaluate_corners(gray: np.ndarray) -> list:
 
 def _calculate_score(straightness: float, uniformity: float,
                      corner_damages: list) -> float:
-    """エッジ・角の総合スコアを算出"""
-    # エッジの直線性
+    """エッジ・角の総合スコアを算出 (再キャリブレーション)"""
     edge_score = straightness * 10.0
-
-    # 角の均一性
     corner_score = uniformity * 10.0
 
-    # 角のダメージペナルティ
+    # ダメージペナルティを軽減 (元: major=1.5 minor=0.5)
     damage_penalty = 0.0
     for d in corner_damages:
-        if d["severity"] == "major":
-            damage_penalty += 1.5
-        else:
-            damage_penalty += 0.5
+        damage_penalty += 0.8 if d["severity"] == "major" else 0.3
 
-    # 加重平均
     base = edge_score * 0.4 + corner_score * 0.6
     final = max(1.0, base - damage_penalty)
-
-    return round(final * 2) / 2  # 0.5刻み
+    return round(final * 2) / 2
 
 
 def _generate_overlay(card_image: np.ndarray, gray: np.ndarray,
