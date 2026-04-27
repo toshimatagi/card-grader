@@ -4,13 +4,19 @@ import cv2
 import numpy as np
 
 
-def analyze_edges(card_image: np.ndarray, is_holo: bool = False) -> dict:
+def analyze_edges(
+    card_image: np.ndarray,
+    is_holo: bool = False,
+    outer_corners: dict | None = None,
+) -> dict:
     """
     カードのエッジ（辺）と角の品質を分析する。
 
     Args:
         card_image: BGR
         is_holo: ホロカードなら検出を緩める
+        outer_corners: 手動指定された実カード4隅 {tl,tr,bl,br: [x,y]}。
+            指定があればそこを corner regions として分析する (傾き対応)。
     """
     h, w = card_image.shape[:2]
     gray = cv2.cvtColor(card_image, cv2.COLOR_BGR2GRAY)
@@ -18,13 +24,13 @@ def analyze_edges(card_image: np.ndarray, is_holo: bool = False) -> dict:
 
     edge_straightness = _analyze_edge_straightness(gray)
     corner_uniformity = _analyze_corner_roundness(gray)
-    corner_damages = _evaluate_corners(gray, sens)
+    corner_damages = _evaluate_corners(gray, sens, outer_corners)
 
     # スコア算出
     score = _calculate_score(edge_straightness, corner_uniformity, corner_damages)
 
     # オーバーレイ画像
-    overlay = _generate_overlay(card_image, gray, corner_damages)
+    overlay = _generate_overlay(card_image, gray, corner_damages, outer_corners)
 
     return {
         "score": score,
@@ -156,17 +162,16 @@ def _analyze_corner_roundness(gray: np.ndarray) -> float:
     return min(uniformity, 1.0)
 
 
-def _evaluate_corners(gray: np.ndarray, sens: float = 1.0) -> list:
-    """4角を個別に評価してダメージを検出 (再キャリブレーション後)"""
+def _evaluate_corners(
+    gray: np.ndarray,
+    sens: float = 1.0,
+    outer_corners: dict | None = None,
+) -> list:
+    """4角を個別に評価してダメージを検出。outer_corners が指定されていれば
+    そのカード実角を中心にした正方形領域を分析する (傾き対応)。"""
     h, w = gray.shape
     corner_size = int(min(h, w) * 0.1)
-
-    corner_regions = {
-        "top-left": (0, 0, corner_size, corner_size),
-        "top-right": (0, w-corner_size, corner_size, w),
-        "bottom-left": (h-corner_size, 0, h, corner_size),
-        "bottom-right": (h-corner_size, w-corner_size, h, w),
-    }
+    corner_regions = _corner_regions(h, w, corner_size, outer_corners)
 
     damages = []
 
@@ -206,6 +211,46 @@ def _evaluate_corners(gray: np.ndarray, sens: float = 1.0) -> list:
     return damages
 
 
+def _corner_regions(
+    h: int, w: int, corner_size: int, outer_corners: dict | None
+) -> dict:
+    """各角の (y1, x1, y2, x2) 領域を返す。outer_corners があればその点を中心にした
+    正方形を取り、無ければ画像の四隅。"""
+    name_to_key = {
+        "top-left": "tl",
+        "top-right": "tr",
+        "bottom-left": "bl",
+        "bottom-right": "br",
+    }
+    if outer_corners:
+        regions = {}
+        half = corner_size // 2
+        for name, key in name_to_key.items():
+            try:
+                cx, cy = outer_corners[key]
+                cx, cy = int(cx), int(cy)
+            except (KeyError, TypeError, ValueError):
+                # 1つでも欠けていたらフォールバック
+                outer_corners = None
+                break
+            y1 = max(0, cy - half)
+            y2 = min(h, cy + half)
+            x1 = max(0, cx - half)
+            x2 = min(w, cx + half)
+            if y2 <= y1 or x2 <= x1:
+                outer_corners = None
+                break
+            regions[name] = (y1, x1, y2, x2)
+        if outer_corners:
+            return regions
+    return {
+        "top-left": (0, 0, corner_size, corner_size),
+        "top-right": (0, w - corner_size, corner_size, w),
+        "bottom-left": (h - corner_size, 0, h, corner_size),
+        "bottom-right": (h - corner_size, w - corner_size, h, w),
+    }
+
+
 def _calculate_score(straightness: float, uniformity: float,
                      corner_damages: list) -> float:
     """エッジ・角の総合スコアを算出 (再キャリブレーション)"""
@@ -223,7 +268,8 @@ def _calculate_score(straightness: float, uniformity: float,
 
 
 def _generate_overlay(card_image: np.ndarray, gray: np.ndarray,
-                      corner_damages: list) -> np.ndarray:
+                      corner_damages: list,
+                      outer_corners: dict | None = None) -> np.ndarray:
     """エッジ・角分析のオーバーレイ画像を生成"""
     overlay = card_image.copy()
     h, w = overlay.shape[:2]
@@ -234,23 +280,23 @@ def _generate_overlay(card_image: np.ndarray, gray: np.ndarray,
     edge_colored[edges > 0] = [0, 255, 0]  # 緑でエッジ表示
     overlay = cv2.addWeighted(overlay, 0.8, edge_colored, 0.2, 0)
 
-    # 角の領域をハイライト
     corner_size = int(min(h, w) * 0.1)
-
-    corner_positions = {
-        "top-left": (0, 0),
-        "top-right": (w - corner_size, 0),
-        "bottom-left": (0, h - corner_size),
-        "bottom-right": (w - corner_size, h - corner_size),
-    }
-
-    # ダメージのある角を赤で、正常な角を緑でマーク
+    regions = _corner_regions(h, w, corner_size, outer_corners)
     damaged_corners = {d["corner"] for d in corner_damages}
 
-    for name, (x, y) in corner_positions.items():
+    for name, (y1, x1, y2, x2) in regions.items():
         color = (0, 0, 255) if name in damaged_corners else (0, 255, 0)
-        cv2.rectangle(overlay, (x, y), (x + corner_size, y + corner_size),
-                      color, 2)
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
+
+    # outer_corners があれば実カード輪郭も黄色で表示
+    if outer_corners:
+        try:
+            pts = np.array(
+                [outer_corners[k] for k in ("tl", "tr", "br", "bl")], dtype=np.int32
+            )
+            cv2.polylines(overlay, [pts], isClosed=True, color=(0, 255, 255), thickness=2)
+        except (KeyError, TypeError, ValueError):
+            pass
 
     # ダメージ情報
     for i, d in enumerate(corner_damages):

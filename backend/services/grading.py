@@ -80,7 +80,24 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     color_result = analyze_color(card_image)
     is_holo = bool(color_result.get("detail", {}).get("is_holo"))
     surface_result = analyze_surface(card_image, is_holo=is_holo)
-    edges_result = analyze_edges(card_image, is_holo=is_holo)
+
+    # 手動センタリングで outer_corners が指定されていれば、edges.py に渡して
+    # 実カード実角を corner region として分析させる (斜め撮影対応)
+    edges_outer_corners = None
+    if manual_centering and "outer_corners" in manual_centering:
+        oc = manual_centering["outer_corners"]
+        # フロントは元画像座標で送ってくるので、card_image にスケール
+        src_w = manual_centering.get("source_width") or card_image.shape[1]
+        src_h = manual_centering.get("source_height") or card_image.shape[0]
+        sx = card_image.shape[1] / max(src_w, 1)
+        sy = card_image.shape[0] / max(src_h, 1)
+        try:
+            edges_outer_corners = {
+                k: [int(oc[k][0] * sx), int(oc[k][1] * sy)] for k in ("tl", "tr", "bl", "br")
+            }
+        except (KeyError, TypeError, IndexError):
+            edges_outer_corners = None
+    edges_result = analyze_edges(card_image, is_holo=is_holo, outer_corners=edges_outer_corners)
 
     # 3. 総合スコア算出
     sub_scores = {
