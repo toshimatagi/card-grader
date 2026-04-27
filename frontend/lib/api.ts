@@ -333,14 +333,25 @@ function dailyAggregateSeries(
 }
 
 export async function listSets(brand: string = "onepiece"): Promise<{ sets: { set_code: string; count: number }[] }> {
-  const items = await sbGet<{ set_code: string }[]>(
-    "cards",
-    `brand=eq.${brand}&select=set_code&limit=100000`
-  );
-  const counts: Record<string, number> = {};
-  for (const it of items) counts[it.set_code] = (counts[it.set_code] ?? 0) + 1;
-  const sets = Object.entries(counts)
-    .map(([set_code, count]) => ({ set_code, count }))
+  // PostgREST はデフォルトで1リクエスト最大1000件を返すため、ページングして全件取得
+  const PAGE = 1000;
+  const all: { set_code: string; card_no: string }[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const chunk = await sbGet<{ set_code: string; card_no: string }[]>(
+      "cards",
+      `brand=eq.${brand}&select=set_code,card_no&order=set_code,card_no&limit=${PAGE}&offset=${offset}`
+    );
+    all.push(...chunk);
+    if (chunk.length < PAGE) break;
+  }
+  // ユニークな card_no で数える (variant 別の重複は除外)
+  const unique: Record<string, Set<string>> = {};
+  for (const it of all) {
+    if (!unique[it.set_code]) unique[it.set_code] = new Set();
+    unique[it.set_code].add(it.card_no);
+  }
+  const sets = Object.entries(unique)
+    .map(([set_code, codes]) => ({ set_code, count: codes.size }))
     .sort((a, b) => a.set_code.localeCompare(b.set_code));
   return { sets };
 }
