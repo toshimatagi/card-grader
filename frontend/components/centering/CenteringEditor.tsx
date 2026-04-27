@@ -229,7 +229,8 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
     color: string,
     isActive: boolean
   ) => {
-    const size = isActive ? 18 : 12;
+    const visibleSize = isActive ? 10 : 7;   // 視認用の小さい丸
+    const hitSize = isActive ? 28 : 22;      // 透明な広いタップ領域
     return (
       <div
         key={`${layer}-${corner}`}
@@ -239,18 +240,29 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
           left: `${p.x * 100}%`,
           top: `${p.y * 100}%`,
           transform: "translate(-50%, -50%)",
-          width: `${size}px`,
-          height: `${size}px`,
-          borderRadius: "50%",
-          backgroundColor: color,
-          border: "2px solid white",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+          width: `${hitSize}px`,
+          height: `${hitSize}px`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           cursor: "grab",
-          opacity: isActive ? 1 : 0.5,
           zIndex: isActive ? 30 : 20,
           touchAction: "none",
         }}
-      />
+      >
+        <div
+          style={{
+            width: `${visibleSize}px`,
+            height: `${visibleSize}px`,
+            borderRadius: "50%",
+            backgroundColor: color,
+            border: "1.5px solid white",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.4)",
+            opacity: isActive ? 1 : 0.6,
+            pointerEvents: "none",
+          }}
+        />
+      </div>
     );
   };
 
