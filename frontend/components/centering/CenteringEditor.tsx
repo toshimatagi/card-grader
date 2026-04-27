@@ -209,13 +209,12 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
       .map((p) => `${p.x * 100},${p.y * 100}`)
       .join(" ");
     return (
-      <g key={layer} opacity={isActive ? 1 : 0.5}>
+      <g key={layer} opacity={isActive ? 1 : 0.7}>
         <polygon
           points={points}
           fill="none"
           stroke={color}
-          strokeWidth={isActive ? 0.4 : 0.25}
-          strokeDasharray="1.2,0.8"
+          strokeWidth={isActive ? 4 : 3}
           vectorEffect="non-scaling-stroke"
           style={{ pointerEvents: "none" }}
         />

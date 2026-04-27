@@ -21,20 +21,15 @@ def analyze_surface(card_image: np.ndarray, is_holo: bool = False) -> dict:
     # ホロカードはパターンノイズが多いので閾値を緩める
     sens = 1.5 if is_holo else 1.0
 
-    defects = []
-    defects.extend(_detect_scratches(gray, sens))
-    defects.extend(_detect_whitening(card_image, gray, sens))
-    defects.extend(_detect_creases(gray, sens))
-    defects.extend(_detect_corner_damage(gray, sens))
+    scratches = _detect_scratches(gray, sens)
+    whitening = _detect_whitening(card_image, gray, sens)
+    creases = _detect_creases(gray, sens)
+    corner_damage = _detect_corner_damage(gray, sens)
+    defects = scratches + whitening + creases + corner_damage
 
-    # スコア算出
     score = _calculate_score(defects)
-
-    # 深刻度判定
     severity = _overall_severity(defects)
     whitening_level = _whitening_level(whitening)
-
-    # オーバーレイ画像生成
     overlay = _generate_overlay(card_image, defects)
 
     return {
