@@ -178,19 +178,46 @@ def _build_manual_centering_result(manual: dict, card_image: np.ndarray) -> dict
     # オーバーレイ画像を生成（手動位置を反映）
     overlay = card_image.copy()
 
-    # 外枠（黄色）
-    ox1 = max(0, left_border - int(left_border * 0.2)) if left_border > 5 else 0
-    oy1 = max(0, top_border - int(top_border * 0.2)) if top_border > 5 else 0
-    ox2 = min(w, w - right_border + int(right_border * 0.2)) if right_border > 5 else w
-    oy2 = min(h, h - bottom_border + int(bottom_border * 0.2)) if bottom_border > 5 else h
-    cv2.rectangle(overlay, (ox1, oy1), (ox2, oy2), (0, 255, 255), 2)
+    # 4隅指定があれば四角形 (斜め対応)、なければ矩形でフォールバック
+    outer_corners = manual.get("outer_corners")
+    inner_corners = manual.get("inner_corners")
 
-    # 内枠（緑）
-    ix1 = left_border
-    iy1 = top_border
-    ix2 = w - right_border
-    iy2 = h - bottom_border
-    cv2.rectangle(overlay, (ix1, iy1), (ix2, iy2), (0, 255, 0), 2)
+    def _scaled_quad(corners: dict, src_w: int, src_h: int) -> np.ndarray | None:
+        if not corners:
+            return None
+        try:
+            pts = [corners["tl"], corners["tr"], corners["br"], corners["bl"]]
+            scale_x = w / max(src_w, 1)
+            scale_y = h / max(src_h, 1)
+            return np.array(
+                [[int(p[0] * scale_x), int(p[1] * scale_y)] for p in pts],
+                dtype=np.int32,
+            )
+        except (KeyError, TypeError, IndexError):
+            return None
+
+    src_w = manual.get("source_width") or w
+    src_h = manual.get("source_height") or h
+    outer_quad = _scaled_quad(outer_corners, src_w, src_h)
+    inner_quad = _scaled_quad(inner_corners, src_w, src_h)
+
+    if outer_quad is not None:
+        cv2.polylines(overlay, [outer_quad], isClosed=True, color=(0, 255, 255), thickness=2)
+    else:
+        ox1 = max(0, left_border - int(left_border * 0.2)) if left_border > 5 else 0
+        oy1 = max(0, top_border - int(top_border * 0.2)) if top_border > 5 else 0
+        ox2 = min(w, w - right_border + int(right_border * 0.2)) if right_border > 5 else w
+        oy2 = min(h, h - bottom_border + int(bottom_border * 0.2)) if bottom_border > 5 else h
+        cv2.rectangle(overlay, (ox1, oy1), (ox2, oy2), (0, 255, 255), 2)
+
+    if inner_quad is not None:
+        cv2.polylines(overlay, [inner_quad], isClosed=True, color=(0, 255, 0), thickness=2)
+    else:
+        ix1 = left_border
+        iy1 = top_border
+        ix2 = w - right_border
+        iy2 = h - bottom_border
+        cv2.rectangle(overlay, (ix1, iy1), (ix2, iy2), (0, 255, 0), 2)
 
     # テキスト表示
     cv2.putText(overlay, f"LR: {lr_ratio} (L:{left_border} R:{right_border})",

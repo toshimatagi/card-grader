@@ -2,16 +2,9 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 
-interface GuideLines {
-  outerLeft: number;
-  outerRight: number;
-  outerTop: number;
-  outerBottom: number;
-  innerLeft: number;
-  innerRight: number;
-  innerTop: number;
-  innerBottom: number;
-}
+interface Pt { x: number; y: number; }
+interface Quad { tl: Pt; tr: Pt; bl: Pt; br: Pt; }
+interface QuadGuides { outer: Quad; inner: Quad; }
 
 interface CenteringResult {
   lr_ratio: string;
@@ -21,6 +14,8 @@ interface CenteringResult {
   top_border: number;
   bottom_border: number;
   grades: GradingStandard[];
+  outer_corners?: { tl: [number, number]; tr: [number, number]; bl: [number, number]; br: [number, number] };
+  inner_corners?: { tl: [number, number]; tr: [number, number]; bl: [number, number]; br: [number, number] };
 }
 
 interface GradingStandard {
@@ -49,33 +44,41 @@ interface Props {
   onSkip: () => void;
 }
 
+const INITIAL: QuadGuides = {
+  outer: {
+    tl: { x: 0.03, y: 0.03 },
+    tr: { x: 0.97, y: 0.03 },
+    bl: { x: 0.03, y: 0.97 },
+    br: { x: 0.97, y: 0.97 },
+  },
+  inner: {
+    tl: { x: 0.07, y: 0.07 },
+    tr: { x: 0.93, y: 0.07 },
+    bl: { x: 0.07, y: 0.93 },
+    br: { x: 0.93, y: 0.93 },
+  },
+};
+
+const CORNER_KEYS: (keyof Quad)[] = ["tl", "tr", "bl", "br"];
+
+const midpoint = (a: Pt, b: Pt): Pt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+const distPx = (a: Pt, b: Pt, w: number, h: number): number =>
+  Math.hypot((a.x - b.x) * w, (a.y - b.y) * h);
+
 export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
 
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageSize, setImageSize] = useState({ w: 0, h: 0 });
   const [displaySize, setDisplaySize] = useState({ w: 0, h: 0 });
   const [zoom, setZoom] = useState(1);
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
 
-  // ガイドラインの位置（画像のピクセル座標、0-1の比率で管理）
-  const [guides, setGuides] = useState<GuideLines>({
-    outerLeft: 0.02,
-    outerRight: 0.98,
-    outerTop: 0.02,
-    outerBottom: 0.98,
-    innerLeft: 0.06,
-    innerRight: 0.94,
-    innerTop: 0.06,
-    innerBottom: 0.94,
-  });
-
-  const [dragging, setDragging] = useState<string | null>(null);
+  const [guides, setGuides] = useState<QuadGuides>(INITIAL);
+  const [dragging, setDragging] = useState<{ layer: "outer" | "inner"; corner: keyof Quad } | null>(null);
   const [activeLayer, setActiveLayer] = useState<"outer" | "inner">("outer");
-  const [showResult, setShowResult] = useState(false);
 
-  // 画像ロード時にサイズ取得
   const handleImageLoad = useCallback(() => {
     const img = imageRef.current;
     if (!img) return;
@@ -83,7 +86,6 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
     setImageLoaded(true);
   }, []);
 
-  // 表示サイズの計算
   useEffect(() => {
     if (!imageLoaded || !containerRef.current) return;
     const container = containerRef.current;
@@ -96,12 +98,8 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
     });
   }, [imageLoaded, imageSize]);
 
-  // 画像内ラッパーのref（ガイドラインの親要素）
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  // マウス座標 → 画像上の比率(0-1)に変換
   const clientToRatio = useCallback(
-    (clientX: number, clientY: number): { x: number; y: number } => {
+    (clientX: number, clientY: number): Pt => {
       const wrapper = wrapperRef.current;
       if (!wrapper) return { x: 0.5, y: 0.5 };
       const rect = wrapper.getBoundingClientRect();
@@ -113,13 +111,11 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
     []
   );
 
-  // ガイドラインのドラッグ
   const handlePointerDown = useCallback(
-    (lineId: string, e: React.PointerEvent) => {
+    (layer: "outer" | "inner", corner: keyof Quad, e: React.PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      setDragging(lineId);
-      // containerにポインターキャプチャを設定（ライン外に出てもドラッグ継続）
+      setDragging({ layer, corner });
       containerRef.current?.setPointerCapture(e.pointerId);
     },
     []
@@ -128,13 +124,13 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (!dragging) return;
-
-      const { x, y } = clientToRatio(e.clientX, e.clientY);
-      const isVertical = dragging.includes("Left") || dragging.includes("Right");
-      const value = isVertical ? x : y;
-      const clamped = Math.max(0.01, Math.min(0.99, value));
-
-      setGuides((prev) => ({ ...prev, [dragging]: clamped }));
+      const p = clientToRatio(e.clientX, e.clientY);
+      const x = Math.max(0, Math.min(1, p.x));
+      const y = Math.max(0, Math.min(1, p.y));
+      setGuides((prev) => ({
+        ...prev,
+        [dragging.layer]: { ...prev[dragging.layer], [dragging.corner]: { x, y } },
+      }));
     },
     [dragging, clientToRatio]
   );
@@ -144,30 +140,43 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
     containerRef.current?.releasePointerCapture(e.pointerId);
   }, []);
 
-  // センタリング計算
   const calculateCentering = useCallback((): CenteringResult => {
-    const leftBorder = guides.innerLeft - guides.outerLeft;
-    const rightBorder = guides.outerRight - guides.innerRight;
-    const topBorder = guides.innerTop - guides.outerTop;
-    const bottomBorder = guides.outerBottom - guides.innerBottom;
+    const { outer, inner } = guides;
+    // 各辺の中点 (左右辺は tl-bl と tr-br、上下辺は tl-tr と bl-br)
+    const oL = midpoint(outer.tl, outer.bl);
+    const oR = midpoint(outer.tr, outer.br);
+    const oT = midpoint(outer.tl, outer.tr);
+    const oB = midpoint(outer.bl, outer.br);
+    const iL = midpoint(inner.tl, inner.bl);
+    const iR = midpoint(inner.tr, inner.br);
+    const iT = midpoint(inner.tl, inner.tr);
+    const iB = midpoint(inner.bl, inner.br);
 
-    const lrTotal = leftBorder + rightBorder || 0.001;
-    const tbTotal = topBorder + bottomBorder || 0.001;
+    const w = imageSize.w || 1;
+    const h = imageSize.h || 1;
+    const lrPx = Math.round(distPx(oL, iL, w, h));
+    const rrPx = Math.round(distPx(oR, iR, w, h));
+    const trPx = Math.round(distPx(oT, iT, w, h));
+    const brPx = Math.round(distPx(oB, iB, w, h));
 
-    const lrLarger = Math.round((Math.max(leftBorder, rightBorder) / lrTotal) * 100);
+    const lrTotal = lrPx + rrPx || 1;
+    const tbTotal = trPx + brPx || 1;
+    const lrLarger = Math.round((Math.max(lrPx, rrPx) / lrTotal) * 100);
     const lrSmaller = 100 - lrLarger;
-    const tbLarger = Math.round((Math.max(topBorder, bottomBorder) / tbTotal) * 100);
+    const tbLarger = Math.round((Math.max(trPx, brPx) / tbTotal) * 100);
     const tbSmaller = 100 - tbLarger;
-
-    const lrPx = Math.round(leftBorder * imageSize.w);
-    const rrPx = Math.round(rightBorder * imageSize.w);
-    const trPx = Math.round(topBorder * imageSize.h);
-    const brPx = Math.round(bottomBorder * imageSize.h);
 
     const grades = GRADING_STANDARDS.map((std) => ({
       ...std,
       pass: lrLarger <= std.lr_threshold && tbLarger <= std.tb_threshold,
     }));
+
+    const cornersToPx = (q: Quad) => ({
+      tl: [Math.round(q.tl.x * w), Math.round(q.tl.y * h)] as [number, number],
+      tr: [Math.round(q.tr.x * w), Math.round(q.tr.y * h)] as [number, number],
+      bl: [Math.round(q.bl.x * w), Math.round(q.bl.y * h)] as [number, number],
+      br: [Math.round(q.br.x * w), Math.round(q.br.y * h)] as [number, number],
+    });
 
     return {
       lr_ratio: `${lrLarger}/${lrSmaller}`,
@@ -177,95 +186,72 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
       top_border: trPx,
       bottom_border: brPx,
       grades,
+      outer_corners: cornersToPx(outer),
+      inner_corners: cornersToPx(inner),
     };
   }, [guides, imageSize]);
 
   const result = imageLoaded ? calculateCentering() : null;
 
-  // ズーム操作
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.2 : 0.2;
-      setZoom((prev) => Math.max(1, Math.min(8, prev + delta)));
-    },
-    []
-  );
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.2 : 0.2;
+    setZoom((prev) => Math.max(1, Math.min(8, prev + delta)));
+  }, []);
 
-  const renderGuideLine = (
-    id: string,
-    position: number,
-    orientation: "vertical" | "horizontal",
+  const renderQuad = (
+    layer: "outer" | "inner",
+    quad: Quad,
     color: string,
-    label: string,
     isActive: boolean
   ) => {
-    const style: React.CSSProperties =
-      orientation === "vertical"
-        ? {
-            left: `${position * 100}%`,
-            top: 0,
-            bottom: 0,
-            width: isActive ? "4px" : "2px",
-            cursor: "ew-resize",
-            backgroundColor: color,
-            position: "absolute",
-            opacity: isActive ? 1 : 0.5,
-            zIndex: isActive ? 20 : 10,
-            touchAction: "none",
-          }
-        : {
-            top: `${position * 100}%`,
-            left: 0,
-            right: 0,
-            height: isActive ? "4px" : "2px",
-            cursor: "ns-resize",
-            backgroundColor: color,
-            position: "absolute",
-            opacity: isActive ? 1 : 0.5,
-            zIndex: isActive ? 20 : 10,
-            touchAction: "none",
-          };
+    const points = [quad.tl, quad.tr, quad.br, quad.bl]
+      .map((p) => `${p.x * 100},${p.y * 100}`)
+      .join(" ");
+    return (
+      <g key={layer} opacity={isActive ? 1 : 0.5}>
+        <polygon
+          points={points}
+          fill="none"
+          stroke={color}
+          strokeWidth={isActive ? 0.4 : 0.25}
+          strokeDasharray="1.2,0.8"
+          vectorEffect="non-scaling-stroke"
+          style={{ pointerEvents: "none" }}
+        />
+      </g>
+    );
+  };
 
+  const renderCornerHandle = (
+    layer: "outer" | "inner",
+    corner: keyof Quad,
+    p: Pt,
+    color: string,
+    isActive: boolean
+  ) => {
+    const size = isActive ? 18 : 12;
     return (
       <div
-        key={id}
-        style={style}
-        onPointerDown={(e) => handlePointerDown(id, e)}
-        title={label}
-      >
-        {/* ドラッグハンドル（広めのタッチ領域） */}
-        <div
-          style={{
-            position: "absolute",
-            ...(orientation === "vertical"
-              ? { left: "-12px", right: "-12px", top: 0, bottom: 0 }
-              : { top: "-12px", bottom: "-12px", left: 0, right: 0 }),
-            cursor: orientation === "vertical" ? "ew-resize" : "ns-resize",
-          }}
-        />
-        {/* ラベル */}
-        {isActive && (
-          <div
-            style={{
-              position: "absolute",
-              ...(orientation === "vertical"
-                ? { top: "4px", left: "6px" }
-                : { left: "4px", top: "6px" }),
-              fontSize: "10px",
-              color: color,
-              fontWeight: "bold",
-              backgroundColor: "rgba(255,255,255,0.85)",
-              padding: "1px 4px",
-              borderRadius: "2px",
-              whiteSpace: "nowrap",
-              pointerEvents: "none",
-            }}
-          >
-            {label}
-          </div>
-        )}
-      </div>
+        key={`${layer}-${corner}`}
+        onPointerDown={(e) => handlePointerDown(layer, corner, e)}
+        style={{
+          position: "absolute",
+          left: `${p.x * 100}%`,
+          top: `${p.y * 100}%`,
+          transform: "translate(-50%, -50%)",
+          width: `${size}px`,
+          height: `${size}px`,
+          borderRadius: "50%",
+          backgroundColor: color,
+          border: "2px solid white",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+          cursor: "grab",
+          opacity: isActive ? 1 : 0.5,
+          zIndex: isActive ? 30 : 20,
+          touchAction: "none",
+        }}
+      />
     );
   };
 
@@ -274,11 +260,10 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
       <div className="text-center">
         <h2 className="text-xl font-bold mb-1">センタリング測定</h2>
         <p className="text-sm text-gray-600">
-          ガイドラインをドラッグしてカード枠に合わせてください
+          4隅の点をドラッグしてカード枠に合わせてください (斜め撮影にも対応)
         </p>
       </div>
 
-      {/* レイヤー切替 */}
       <div className="flex justify-center gap-2">
         <button
           onClick={() => setActiveLayer("outer")}
@@ -300,9 +285,15 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
         >
           🟢 内枠（印刷枠）
         </button>
+        <button
+          onClick={() => setGuides(INITIAL)}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700"
+          title="4隅をリセット"
+        >
+          ↺ リセット
+        </button>
       </div>
 
-      {/* ズームコントロール */}
       <div className="flex items-center justify-center gap-3">
         <button
           onClick={() => setZoom((z) => Math.max(1, z - 0.5))}
@@ -310,24 +301,15 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
         >
           −
         </button>
-        <span className="text-sm font-medium min-w-[50px] text-center">
-          {zoom.toFixed(1)}x
-        </span>
+        <span className="text-sm font-medium min-w-[50px] text-center">{zoom.toFixed(1)}x</span>
         <button
           onClick={() => setZoom((z) => Math.min(8, z + 0.5))}
           className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-lg"
         >
           +
         </button>
-        <button
-          onClick={() => { setZoom(1); setPanOffset({ x: 0, y: 0 }); }}
-          className="text-xs text-gray-500 hover:text-gray-700 ml-2"
-        >
-          リセット
-        </button>
       </div>
 
-      {/* 画像 + ガイドライン */}
       <div
         ref={containerRef}
         className="relative overflow-hidden bg-gray-100 rounded-xl border-2 border-gray-300"
@@ -362,58 +344,54 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
 
           {imageLoaded && (
             <>
-              {/* 外枠ガイドライン（黄色） */}
-              {renderGuideLine("outerLeft", guides.outerLeft, "vertical", "#EAB308", "外枠 左", activeLayer === "outer")}
-              {renderGuideLine("outerRight", guides.outerRight, "vertical", "#EAB308", "外枠 右", activeLayer === "outer")}
-              {renderGuideLine("outerTop", guides.outerTop, "horizontal", "#EAB308", "外枠 上", activeLayer === "outer")}
-              {renderGuideLine("outerBottom", guides.outerBottom, "horizontal", "#EAB308", "外枠 下", activeLayer === "outer")}
-
-              {/* 内枠ガイドライン（緑） */}
-              {renderGuideLine("innerLeft", guides.innerLeft, "vertical", "#22C55E", "内枠 左", activeLayer === "inner")}
-              {renderGuideLine("innerRight", guides.innerRight, "vertical", "#22C55E", "内枠 右", activeLayer === "inner")}
-              {renderGuideLine("innerTop", guides.innerTop, "horizontal", "#22C55E", "内枠 上", activeLayer === "inner")}
-              {renderGuideLine("innerBottom", guides.innerBottom, "horizontal", "#22C55E", "内枠 下", activeLayer === "inner")}
-
-              {/* ボーダー領域の半透明オーバーレイ */}
-              <div
+              <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
                 style={{
                   position: "absolute",
-                  left: `${guides.outerLeft * 100}%`,
-                  top: `${guides.outerTop * 100}%`,
-                  right: `${(1 - guides.outerRight) * 100}%`,
-                  bottom: `${(1 - guides.outerBottom) * 100}%`,
-                  border: "2px dashed rgba(234, 179, 8, 0.6)",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
                   pointerEvents: "none",
                   zIndex: 5,
                 }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  left: `${guides.innerLeft * 100}%`,
-                  top: `${guides.innerTop * 100}%`,
-                  right: `${(1 - guides.innerRight) * 100}%`,
-                  bottom: `${(1 - guides.innerBottom) * 100}%`,
-                  border: "2px dashed rgba(34, 197, 94, 0.6)",
-                  pointerEvents: "none",
-                  zIndex: 5,
-                }}
-              />
+              >
+                {renderQuad("outer", guides.outer, "#EAB308", activeLayer === "outer")}
+                {renderQuad("inner", guides.inner, "#22C55E", activeLayer === "inner")}
+              </svg>
+
+              {/* 4隅のドラッグハンドル */}
+              {(["outer", "inner"] as const).map((layer) =>
+                CORNER_KEYS.map((corner) =>
+                  renderCornerHandle(
+                    layer,
+                    corner,
+                    guides[layer][corner],
+                    layer === "outer" ? "#EAB308" : "#22C55E",
+                    activeLayer === layer
+                  )
+                )
+              )}
             </>
           )}
         </div>
       </div>
 
-      {/* リアルタイム結果表示 */}
       {result && (
         <div className="bg-white rounded-xl border shadow-sm p-4 space-y-3">
           <div className="grid grid-cols-2 gap-4 text-center">
             <div>
               <div className="text-xs text-gray-500">左右 (L/R)</div>
-              <div className={`text-2xl font-bold ${
-                parseInt(result.lr_ratio) <= 55 ? "text-green-600" :
-                parseInt(result.lr_ratio) <= 60 ? "text-yellow-600" : "text-red-600"
-              }`}>
+              <div
+                className={`text-2xl font-bold ${
+                  parseInt(result.lr_ratio) <= 55
+                    ? "text-green-600"
+                    : parseInt(result.lr_ratio) <= 60
+                    ? "text-yellow-600"
+                    : "text-red-600"
+                }`}
+              >
                 {result.lr_ratio}
               </div>
               <div className="text-xs text-gray-400">
@@ -422,10 +400,15 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
             </div>
             <div>
               <div className="text-xs text-gray-500">上下 (T/B)</div>
-              <div className={`text-2xl font-bold ${
-                parseInt(result.tb_ratio) <= 55 ? "text-green-600" :
-                parseInt(result.tb_ratio) <= 60 ? "text-yellow-600" : "text-red-600"
-              }`}>
+              <div
+                className={`text-2xl font-bold ${
+                  parseInt(result.tb_ratio) <= 55
+                    ? "text-green-600"
+                    : parseInt(result.tb_ratio) <= 60
+                    ? "text-yellow-600"
+                    : "text-red-600"
+                }`}
+              >
                 {result.tb_ratio}
               </div>
               <div className="text-xs text-gray-400">
@@ -434,7 +417,6 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
             </div>
           </div>
 
-          {/* 鑑定機関別グレード */}
           <div>
             <div className="text-xs font-medium text-gray-500 mb-2">鑑定機関別の最高グレード</div>
             <div className="grid grid-cols-3 gap-2">
@@ -455,7 +437,6 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
         </div>
       )}
 
-      {/* アクションボタン */}
       <div className="flex gap-3">
         <button
           onClick={onSkip}
