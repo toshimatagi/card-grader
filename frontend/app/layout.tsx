@@ -39,9 +39,6 @@ export default function RootLayout({
               <a href="/guide" className="hover:text-blue-400 transition-colors">
                 使い方
               </a>
-              <a href="/spec" className="hover:text-blue-400 transition-colors">
-                仕様書
-              </a>
             </div>
           </nav>
         </header>
