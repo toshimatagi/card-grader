@@ -6,6 +6,8 @@ interface Pt { x: number; y: number; }
 interface Quad { tl: Pt; tr: Pt; bl: Pt; br: Pt; }
 interface QuadGuides { outer: Quad; inner: Quad; }
 
+type LandmarkKey = "cost" | "life" | "power" | "name_band";
+
 interface CenteringResult {
   lr_ratio: string;
   tb_ratio: string;
@@ -16,6 +18,9 @@ interface CenteringResult {
   grades: GradingStandard[];
   outer_corners?: { tl: [number, number]; tr: [number, number]; bl: [number, number]; br: [number, number] };
   inner_corners?: { tl: [number, number]; tr: [number, number]; bl: [number, number]; br: [number, number] };
+  landmarks?: Partial<Record<LandmarkKey, [number, number]>>;
+  source_width?: number;
+  source_height?: number;
 }
 
 interface GradingStandard {
@@ -42,7 +47,23 @@ interface Props {
   imageSrc: string;
   onComplete: (result: CenteringResult) => void;
   onSkip: () => void;
+  fullartMode?: boolean;
+  cardKind?: "character" | "leader";
 }
+
+// レイアウト種別ごとのランドマーク定義 (ラベル + 初期位置)
+const LANDMARK_DEFS: Record<"character" | "leader", Array<{ key: LandmarkKey; label: string; default: Pt }>> = {
+  character: [
+    { key: "cost", label: "コスト", default: { x: 0.10, y: 0.08 } },
+    { key: "power", label: "パワー", default: { x: 0.83, y: 0.92 } },
+    { key: "name_band", label: "名前帯", default: { x: 0.50, y: 0.86 } },
+  ],
+  leader: [
+    { key: "life", label: "ライフ", default: { x: 0.83, y: 0.10 } },
+    { key: "power", label: "パワー", default: { x: 0.83, y: 0.92 } },
+    { key: "name_band", label: "名前帯", default: { x: 0.50, y: 0.86 } },
+  ],
+};
 
 const INITIAL: QuadGuides = {
   outer: {
@@ -65,7 +86,13 @@ const midpoint = (a: Pt, b: Pt): Pt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2
 const distPx = (a: Pt, b: Pt, w: number, h: number): number =>
   Math.hypot((a.x - b.x) * w, (a.y - b.y) * h);
 
-export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props) {
+export default function CenteringEditor({
+  imageSrc,
+  onComplete,
+  onSkip,
+  fullartMode = false,
+  cardKind = "character",
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -76,8 +103,19 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
   const [zoom, setZoom] = useState(1);
 
   const [guides, setGuides] = useState<QuadGuides>(INITIAL);
-  const [dragging, setDragging] = useState<{ layer: "outer" | "inner"; corner: keyof Quad } | null>(null);
-  const [activeLayer, setActiveLayer] = useState<"outer" | "inner">("outer");
+  const [dragging, setDragging] = useState<
+    | { kind: "quad"; layer: "outer" | "inner"; corner: keyof Quad }
+    | { kind: "landmark"; key: LandmarkKey }
+    | null
+  >(null);
+  const [activeLayer, setActiveLayer] = useState<"outer" | "inner" | "landmark">("outer");
+
+  // ランドマーク (フルアート系のみ): デフォルトはテンプレ位置、ユーザー操作で更新
+  const landmarkDefs = LANDMARK_DEFS[cardKind] || LANDMARK_DEFS.character;
+  const initialLandmarks: Partial<Record<LandmarkKey, Pt>> = {};
+  for (const d of landmarkDefs) initialLandmarks[d.key] = d.default;
+  const [landmarks, setLandmarks] = useState<Partial<Record<LandmarkKey, Pt>>>(initialLandmarks);
+  const [landmarksTouched, setLandmarksTouched] = useState(false);
 
   const handleImageLoad = useCallback(() => {
     const img = imageRef.current;
@@ -111,11 +149,22 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
     []
   );
 
-  const handlePointerDown = useCallback(
+  const handleQuadPointerDown = useCallback(
     (layer: "outer" | "inner", corner: keyof Quad, e: React.PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      setDragging({ layer, corner });
+      setDragging({ kind: "quad", layer, corner });
+      containerRef.current?.setPointerCapture(e.pointerId);
+    },
+    []
+  );
+
+  const handleLandmarkPointerDown = useCallback(
+    (key: LandmarkKey, e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragging({ kind: "landmark", key });
+      setLandmarksTouched(true);
       containerRef.current?.setPointerCapture(e.pointerId);
     },
     []
@@ -127,10 +176,14 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
       const p = clientToRatio(e.clientX, e.clientY);
       const x = Math.max(0, Math.min(1, p.x));
       const y = Math.max(0, Math.min(1, p.y));
-      setGuides((prev) => ({
-        ...prev,
-        [dragging.layer]: { ...prev[dragging.layer], [dragging.corner]: { x, y } },
-      }));
+      if (dragging.kind === "quad") {
+        setGuides((prev) => ({
+          ...prev,
+          [dragging.layer]: { ...prev[dragging.layer], [dragging.corner]: { x, y } },
+        }));
+      } else {
+        setLandmarks((prev) => ({ ...prev, [dragging.key]: { x, y } }));
+      }
     },
     [dragging, clientToRatio]
   );
@@ -178,6 +231,13 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
       br: [Math.round(q.br.x * w), Math.round(q.br.y * h)] as [number, number],
     });
 
+    const landmarksPx: Partial<Record<LandmarkKey, [number, number]>> = {};
+    if (fullartMode && landmarksTouched) {
+      for (const [k, p] of Object.entries(landmarks)) {
+        if (p) landmarksPx[k as LandmarkKey] = [Math.round(p.x * w), Math.round(p.y * h)];
+      }
+    }
+
     return {
       lr_ratio: `${lrLarger}/${lrSmaller}`,
       tb_ratio: `${tbLarger}/${tbSmaller}`,
@@ -188,8 +248,11 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
       grades,
       outer_corners: cornersToPx(outer),
       inner_corners: cornersToPx(inner),
+      ...(Object.keys(landmarksPx).length > 0 ? { landmarks: landmarksPx } : {}),
+      source_width: w,
+      source_height: h,
     };
-  }, [guides, imageSize]);
+  }, [guides, imageSize, fullartMode, landmarksTouched, landmarks]);
 
   const result = imageLoaded ? calculateCentering() : null;
 
@@ -234,7 +297,7 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
     return (
       <div
         key={`${layer}-${corner}`}
-        onPointerDown={(e) => handlePointerDown(layer, corner, e)}
+        onPointerDown={(e) => handleQuadPointerDown(layer, corner, e)}
         style={{
           position: "absolute",
           left: `${p.x * 100}%`,
@@ -262,6 +325,67 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
             pointerEvents: "none",
           }}
         />
+      </div>
+    );
+  };
+
+  const renderLandmarkHandle = (
+    key: LandmarkKey,
+    label: string,
+    p: Pt,
+    isActive: boolean,
+    isTouched: boolean
+  ) => {
+    const color = "#3B82F6"; // blue-500
+    const visibleSize = isActive ? 14 : 10;
+    return (
+      <div
+        key={`landmark-${key}`}
+        onPointerDown={(e) => handleLandmarkPointerDown(key, e)}
+        style={{
+          position: "absolute",
+          left: `${p.x * 100}%`,
+          top: `${p.y * 100}%`,
+          transform: "translate(-50%, -50%)",
+          width: "32px",
+          height: "32px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "grab",
+          zIndex: isActive ? 30 : 18,
+          touchAction: "none",
+        }}
+      >
+        <div
+          style={{
+            width: `${visibleSize}px`,
+            height: `${visibleSize}px`,
+            borderRadius: "50%",
+            backgroundColor: color,
+            border: "2px solid white",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.4)",
+            opacity: isActive ? 1 : isTouched ? 0.8 : 0.4,
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            marginTop: "2px",
+            fontSize: "9px",
+            color: color,
+            backgroundColor: "rgba(255,255,255,0.85)",
+            padding: "1px 4px",
+            borderRadius: "2px",
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+            opacity: isActive ? 1 : 0.6,
+          }}
+        >
+          {label}
+        </div>
       </div>
     );
   };
@@ -296,14 +420,37 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
         >
           🟢 内枠（印刷枠）
         </button>
+        {fullartMode && (
+          <button
+            onClick={() => setActiveLayer("landmark")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeLayer === "landmark"
+                ? "bg-blue-500 text-white"
+                : "bg-gray-100 hover:bg-gray-200 text-gray-700"
+            }`}
+            title="フルアート系カード向け: 主要パーツの位置を指定して精度を上げる"
+          >
+            🔵 デザイン位置 (任意)
+          </button>
+        )}
         <button
-          onClick={() => setGuides(INITIAL)}
+          onClick={() => {
+            setGuides(INITIAL);
+            setLandmarks(initialLandmarks);
+            setLandmarksTouched(false);
+          }}
           className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700"
-          title="4隅をリセット"
+          title="位置をリセット"
         >
           ↺ リセット
         </button>
       </div>
+
+      {fullartMode && activeLayer === "landmark" && (
+        <p className="text-center text-xs text-gray-600">
+          🔵 をドラッグしてカード上の位置に合わせてください (動かさない場合はそのランドマークは未測定)
+        </p>
+      )}
 
       <div className="flex items-center justify-center gap-3">
         <button
@@ -384,6 +531,19 @@ export default function CenteringEditor({ imageSrc, onComplete, onSkip }: Props)
                   )
                 )
               )}
+
+              {/* ランドマーク (フルアート系のみ表示) */}
+              {fullartMode &&
+                landmarkDefs.map((d) => {
+                  const p = landmarks[d.key] ?? d.default;
+                  return renderLandmarkHandle(
+                    d.key,
+                    d.label,
+                    p,
+                    activeLayer === "landmark",
+                    landmarksTouched
+                  );
+                })}
             </>
           )}
         </div>

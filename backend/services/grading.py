@@ -74,6 +74,34 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     # 2. 各分析を実行
     if manual_centering and "lr_ratio" in manual_centering:
         centering_result = _build_manual_centering_result(manual_centering, card_image)
+        # フルアート系のランドマーク補正 (任意)
+        landmarks = manual_centering.get("landmarks")
+        outer_corners_for_landmark = manual_centering.get("outer_corners")
+        if landmarks and outer_corners_for_landmark and brand:
+            from .card_layouts import compute_design_alignment, get_template_for
+            template = get_template_for(brand, rarity)
+            # ランドマーク座標を card_image スケールに合わせる
+            src_w = manual_centering.get("source_width") or card_image.shape[1]
+            src_h = manual_centering.get("source_height") or card_image.shape[0]
+            sx = card_image.shape[1] / max(src_w, 1)
+            sy = card_image.shape[0] / max(src_h, 1)
+            scaled_landmarks = {
+                k: [v[0] * sx, v[1] * sy] for k, v in landmarks.items() if v
+            }
+            scaled_outer = {
+                k: [v[0] * sx, v[1] * sy] for k, v in outer_corners_for_landmark.items()
+            }
+            design_score, design_detail = compute_design_alignment(
+                scaled_landmarks, scaled_outer, template
+            )
+            if design_detail.get("marked", 0) > 0:
+                # margin_balance 60% + design_alignment 40%
+                margin_score = centering_result["score"]
+                combined = round((0.6 * margin_score + 0.4 * design_score) * 2) / 2
+                centering_result["score"] = combined
+                centering_result["detail"]["margin_score"] = margin_score
+                centering_result["detail"]["design_score"] = design_score
+                centering_result["detail"]["design_alignment"] = design_detail
     else:
         centering_result = analyze_centering(card_image, mode=centering_mode, border_ratios=border_ratios)
     # color を先に走らせて is_holo を取得し、surface/edges に渡してホロ用に閾値を緩める

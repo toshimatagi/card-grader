@@ -140,6 +140,11 @@ export default function Home() {
             imageSrc={correctedImage || preview!}
             onComplete={(r) => handleCenteringComplete(r as unknown as Record<string, unknown>)}
             onSkip={handleSkipCentering}
+            fullartMode={(() => {
+              const r = currentBrand?.rarities.find((x) => x.id === selectedRarity);
+              return !!r && (!r.has_border || r.border_type === "none");
+            })()}
+            cardKind={selectedRarity === "l" ? "leader" : "character"}
           />
           {loading && (
             <div className="mt-4 text-center">
