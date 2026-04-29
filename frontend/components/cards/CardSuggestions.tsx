@@ -92,6 +92,7 @@ export default function CardSuggestions({
               </div>
               <div className="text-[10px] text-gray-500 truncate">
                 {VARIANT_LABEL[c.variant] ?? c.variant} · {c.rarity}
+                <span className="ml-1 text-gray-400">({c.distance})</span>
               </div>
             </button>
           );

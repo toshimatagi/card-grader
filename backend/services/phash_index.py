@@ -112,7 +112,7 @@ class PhashIndex:
         self,
         query_phash: bytes,
         brand: Optional[str] = None,
-        max_distance: int = 18,
+        max_distance: int = 14,
         limit: int = 5,
     ) -> list[dict]:
         await self.ensure_loaded()
