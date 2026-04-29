@@ -17,8 +17,37 @@ import sys
 from typing import Optional
 
 import httpx
+import cv2
+import numpy as np
 
-from backend.services.phash import compute_phash_from_bytes
+from backend.services.phash import compute_phash
+from backend.services.preprocessing import detect_card
+
+
+def _normalize_then_phash(image_bytes: bytes) -> bytes:
+    """suggest_cards と同じパイプラインで pHash を計算する。
+
+    1. デコード
+    2. 長辺1200pxにダウンスケール
+    3. detect_card で正面化 + トリミング (失敗時は元画像)
+    4. compute_phash (アート領域)
+    """
+    arr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("画像のデコードに失敗")
+
+    h, w = img.shape[:2]
+    if max(h, w) > 1200:
+        scale = 1200 / max(h, w)
+        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+    try:
+        card = detect_card(img, trim=True)
+        normalized = card["card_image"]
+    except Exception:
+        normalized = img
+    return compute_phash(normalized)
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -70,7 +99,7 @@ async def process_one(client: httpx.AsyncClient, sem: asyncio.Semaphore, card: d
         try:
             r = await client.get(card["image_url"], timeout=30, follow_redirects=True)
             r.raise_for_status()
-            phash = compute_phash_from_bytes(r.content)
+            phash = _normalize_then_phash(r.content)
             await update_phash(client, card["id"], phash)
             return None
         except Exception as e:
