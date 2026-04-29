@@ -192,7 +192,34 @@ export interface CardSummary {
   image_url: string | null;
 }
 
-import { sbGet } from "./supabase";
+import { sbGet, sbRpc } from "./supabase";
+
+export interface TrendingCard {
+  card_id: string;
+  set_code: string;
+  card_no: string;
+  variant: string;
+  rarity: string;
+  name_ja: string;
+  image_url: string | null;
+  now_price: number;
+  past_price: number;
+  pct_change: number;
+}
+
+export async function getTrending(params: {
+  brand?: string;
+  periodHours: number;
+  priceType?: "sell" | "buy";
+  limit?: number;
+}): Promise<TrendingCard[]> {
+  return sbRpc<TrendingCard[]>("trending_cards", {
+    p_brand: params.brand ?? "onepiece",
+    p_period_hours: params.periodHours,
+    p_price_type: params.priceType ?? "sell",
+    p_limit: params.limit ?? 50,
+  });
+}
 
 export async function searchCards(params: {
   brand?: string;

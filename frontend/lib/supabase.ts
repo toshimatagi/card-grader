@@ -26,3 +26,23 @@ export async function sbGet<T = unknown>(
   }
   return (await res.json()) as T;
 }
+
+export async function sbRpc<T = unknown>(
+  fn: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    throw new Error("Supabase 環境変数未設定 (SUPABASE_URL / SUPABASE_SERVICE_KEY)");
+  }
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Supabase RPC ${fn} ${res.status}: ${text}`);
+  }
+  return (await res.json()) as T;
+}
