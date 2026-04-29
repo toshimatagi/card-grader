@@ -10,6 +10,7 @@ interface Props {
   cardName?: string;
   brand?: string;
   shareUrl?: string;
+  cardId?: string;
 }
 
 const SUB_GRADE_LABELS: Record<string, { label: string; icon: string }> = {

@@ -125,6 +125,36 @@ export async function getHistory(): Promise<{ total: number; items: HistoryItem[
   return res.json();
 }
 
+export interface CardSuggestion {
+  card_id: string;
+  set_code: string;
+  card_no: string;
+  variant: string;
+  rarity: string;
+  name_ja: string;
+  image_url: string | null;
+  distance: number;
+}
+
+export async function suggestCards(
+  frontImage: File,
+  brand: string = "onepiece",
+  limit: number = 5
+): Promise<CardSuggestion[]> {
+  const formData = new FormData();
+  formData.append("front_image", frontImage);
+  formData.append("brand", brand);
+  formData.append("limit", String(limit));
+
+  const res = await fetch(`${API_BASE}/api/v1/suggest_cards`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.candidates || [];
+}
+
 export interface EbaySoldItem {
   title: string;
   price: number;

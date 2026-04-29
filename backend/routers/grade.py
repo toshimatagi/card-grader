@@ -181,6 +181,52 @@ async def preprocess_image(
     }
 
 
+@router.post("/suggest_cards")
+async def suggest_cards(
+    front_image: UploadFile = File(...),
+    brand: str = Form("onepiece"),
+    limit: int = Form(5),
+):
+    """画像pHashで価格DBから類似カードTOPを返す。
+
+    - 入力: 鑑定写真（生のJPEG/PNG）。preprocess済み画像でもOK。
+    - 内部で正面化を試みる（失敗時は生画像でもfall back）→ pHash → DBの最近傍を返す
+    """
+    if front_image.content_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(400, "対応画像形式: JPEG, PNG, WebP")
+
+    image_bytes = await front_image.read()
+    if not image_bytes:
+        raise HTTPException(400, "画像データが空です")
+
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(400, "画像のデコードに失敗しました")
+
+    # 大きい場合は1200pxに縮小
+    h, w = image.shape[:2]
+    if max(h, w) > 1200:
+        scale = 1200 / max(h, w)
+        image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+    # 正面化を試みる（失敗時はそのまま使う）
+    try:
+        from ..services.preprocessing import detect_card
+
+        card_data = detect_card(image, trim=True)
+        normalized = card_data["card_image"]
+    except Exception:
+        normalized = image
+
+    from ..services.phash import compute_phash
+    from ..services.phash_index import phash_index
+
+    query = compute_phash(normalized)
+    candidates = await phash_index.nearest(query, brand=brand or None, limit=limit)
+    return {"candidates": candidates}
+
+
 @router.get("/ebay/sold")
 async def ebay_sold_search(q: str, brand: str = ""):
     """eBayのSold Listings（販売済み商品）を検索"""
