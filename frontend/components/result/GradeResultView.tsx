@@ -9,6 +9,7 @@ interface Props {
   result: GradeResult;
   cardName?: string;
   brand?: string;
+  shareUrl?: string;
 }
 
 const SUB_GRADE_LABELS: Record<string, { label: string; icon: string }> = {
@@ -25,8 +26,46 @@ const OVERLAY_LABELS: Record<string, string> = {
   edges_corners: "エッジ・角",
 };
 
-export default function GradeResultView({ result, cardName, brand }: Props) {
+export default function GradeResultView({ result, cardName, brand, shareUrl: shareUrlProp }: Props) {
   const [activeOverlay, setActiveOverlay] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const shareUrl =
+    shareUrlProp ||
+    (typeof window !== "undefined" ? `${window.location.origin}/grade/${result.id}` : "");
+  const cardLabel = cardName?.trim();
+  const shareTitle = cardLabel
+    ? `${cardLabel} 鑑定結果: 総合 ${result.overall_grade.toFixed(1)} / 10.0 — TCG Authority`
+    : `鑑定結果: 総合 ${result.overall_grade.toFixed(1)} / 10.0 — TCG Authority`;
+  const shareText = `センタリング ${result.sub_grades.centering.score} / 表面 ${result.sub_grades.surface.score} / 色印刷 ${result.sub_grades.color_print.score} / エッジ ${result.sub_grades.edges_corners.score}`;
+  const brandHashtag: Record<string, string> = {
+    onepiece: "ワンピカード",
+    pokemon: "ポケカ",
+    yugioh: "遊戯王",
+    dragonball_fw: "ドラゴンボールFW",
+  };
+  const hashtags = ["カード鑑定", brand ? brandHashtag[brand] : ""].filter(Boolean).join(",");
+
+  const handleShare = async () => {
+    if (!shareUrl) return;
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+        return;
+      } catch {
+        // ユーザーがキャンセルした場合は無視してクリップボードへフォールバック
+      }
+    }
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const tweetUrl = shareUrl
+    ? `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareTitle + "\n" + shareText)}&url=${encodeURIComponent(shareUrl)}${hashtags ? `&hashtags=${encodeURIComponent(hashtags)}` : ""}`
+    : "";
 
   const gradeColor = (score: number): string => {
     if (score >= 9) return "text-green-600";
@@ -44,6 +83,30 @@ export default function GradeResultView({ result, cardName, brand }: Props) {
 
   return (
     <div className="space-y-6">
+      {/* シェアボタン */}
+      {shareUrl && (
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={handleShare}
+            className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-medium flex items-center gap-1.5"
+            title="結果を共有"
+          >
+            🔗 {copied ? "URLをコピーしました" : "結果を共有"}
+          </button>
+          {tweetUrl && (
+            <a
+              href={tweetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 rounded-lg bg-black text-white hover:bg-gray-800 text-sm font-medium flex items-center gap-1.5"
+              title="Xでシェア"
+            >
+              𝕏 シェア
+            </a>
+          )}
+        </div>
+      )}
+
       {/* ヘッダー: 総合スコア */}
       <div className={`rounded-xl border-2 p-6 ${gradeBg(result.overall_grade)}`}>
         <div className="flex items-center justify-between">
