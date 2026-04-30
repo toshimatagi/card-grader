@@ -20,7 +20,8 @@ const VARIANT_LABEL: Record<string, string> = {
   other: "その他",
 };
 
-const CARD_CODE_RE = /([A-Za-z]{1,4}\d{1,3})-(\d{1,4})/;
+// 型番として扱うのは ハイフン後 2 桁以上揃ってから（"OP09-0" などはまだ確定しない）
+const CARD_CODE_RE = /([A-Za-z]{1,4}\d{1,3})-(\d{2,4})/;
 
 export default function CardNameAutocomplete({
   value,
@@ -52,6 +53,7 @@ export default function CardNameAutocomplete({
         params.set("limit", "12");
         if (codeMatch) {
           params.set("set", codeMatch[1].toUpperCase());
+          params.set("card_no", codeMatch[2]);
         } else {
           params.set("q", trimmed);
         }
@@ -60,12 +62,7 @@ export default function CardNameAutocomplete({
         });
         if (!res.ok) throw new Error("search failed");
         const data = await res.json();
-        let items: CardSummary[] = data.items || [];
-        if (codeMatch) {
-          const cardNo = codeMatch[2].padStart(3, "0");
-          const exact = items.filter((c) => c.card_no === cardNo);
-          if (exact.length > 0) items = exact;
-        }
+        const items: CardSummary[] = data.items || [];
         setResults(items.slice(0, 8));
       } catch (e) {
         if ((e as Error).name !== "AbortError") setResults([]);
