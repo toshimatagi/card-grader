@@ -25,6 +25,7 @@ export default function Home() {
   const [selectedRarity, setSelectedRarity] = useState("");
   const [cardName, setCardName] = useState("");
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [selectedCardCode, setSelectedCardCode] = useState<string | null>(null);
 
   useEffect(() => {
     getBrands().then(setBrands).catch(() => {});
@@ -77,10 +78,12 @@ export default function Home() {
     setManualCentering(null);
     setCorrectedImage(null);
     setSelectedCardId(null);
+    setSelectedCardCode(null);
   };
 
   const handlePickCard = (c: CardSummary) => {
     setSelectedCardId(c.id);
+    setSelectedCardCode(`${c.set_code}-${c.card_no}`);
     setCardName(`${c.name_ja} ${c.set_code}-${c.card_no} ${c.rarity}`);
   };
 
@@ -334,6 +337,7 @@ export default function Home() {
                   onChange={(v) => {
                     setCardName(v);
                     setSelectedCardId(null);
+                    setSelectedCardCode(null);
                   }}
                   onSelect={handlePickCard}
                   brand={selectedBrand}
@@ -397,7 +401,12 @@ export default function Home() {
           >
             ← 新しいカードを鑑定
           </button>
-          <GradeResultView result={result} cardName={cardName} brand={selectedBrand} />
+          <GradeResultView
+            result={result}
+            cardName={cardName}
+            brand={selectedBrand}
+            cardCode={selectedCardCode ?? undefined}
+          />
         </div>
       ) : step === "result" && loading ? (
         <div className="max-w-2xl mx-auto text-center py-20">

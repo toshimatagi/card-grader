@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { GradeResult } from "../../lib/api";
 import ScoreGauge from "./ScoreGauge";
-import EbaySoldPrices from "./EbaySoldPrices";
+import CardPriceSummary from "../cards/CardPriceSummary";
 
 interface Props {
   result: GradeResult;
@@ -11,6 +11,7 @@ interface Props {
   brand?: string;
   shareUrl?: string;
   cardId?: string;
+  cardCode?: string;
 }
 
 const SUB_GRADE_LABELS: Record<string, { label: string; icon: string }> = {
@@ -27,7 +28,7 @@ const OVERLAY_LABELS: Record<string, string> = {
   edges_corners: "エッジ・角",
 };
 
-export default function GradeResultView({ result, cardName, brand, shareUrl: shareUrlProp }: Props) {
+export default function GradeResultView({ result, cardName, brand, shareUrl: shareUrlProp, cardCode }: Props) {
   const [activeOverlay, setActiveOverlay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -327,8 +328,8 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
         </div>
       </div>
 
-      {/* eBay Sold価格 */}
-      {cardName && <EbaySoldPrices cardName={cardName} brand={brand || ""} />}
+      {/* 価格DB（販売・買取の中央値） */}
+      {cardCode && <CardPriceSummary code={cardCode} />}
     </div>
   );
 }
