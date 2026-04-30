@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { gradeCard, getBrands, preprocessImage, GradeResult, Brand } from "../lib/api";
+import { gradeCard, getBrands, preprocessImage, GradeResult, Brand, CardSummary } from "../lib/api";
 import GradeResultView from "../components/result/GradeResultView";
 import CenteringEditor from "../components/centering/CenteringEditor";
+import CardNameAutocomplete from "../components/cards/CardNameAutocomplete";
 
 type AppStep = "upload" | "centering" | "result";
 
@@ -23,6 +24,7 @@ export default function Home() {
   const [selectedBrand, setSelectedBrand] = useState("");
   const [selectedRarity, setSelectedRarity] = useState("");
   const [cardName, setCardName] = useState("");
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
   useEffect(() => {
     getBrands().then(setBrands).catch(() => {});
@@ -74,6 +76,12 @@ export default function Home() {
     setStep("upload");
     setManualCentering(null);
     setCorrectedImage(null);
+    setSelectedCardId(null);
+  };
+
+  const handlePickCard = (c: CardSummary) => {
+    setSelectedCardId(c.id);
+    setCardName(`${c.name_ja} ${c.set_code}-${c.card_no} ${c.rarity}`);
   };
 
   // センタリングエディターからの結果で鑑定開始
@@ -314,26 +322,40 @@ export default function Home() {
             </div>
           )}
 
-          {/* カード名入力 */}
+          {/* カード名・型番入力 */}
           {selectedBrand && (
             <div className="mt-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                カード名（eBay価格検索用・任意）
+                カード（型番または名前で検索・任意）
               </label>
-              <input
-                type="text"
-                value={cardName}
-                onChange={(e) => setCardName(e.target.value)}
-                placeholder={
-                  selectedBrand === "pokemon" ? "例: リザードン SAR SV6-103" :
-                  selectedBrand === "onepiece" ? "例: ナミ OP09-050 SR" :
-                  selectedBrand === "yugioh" ? "例: ブラック・マジシャン QCSE-JP001" :
-                  "例: カード名 セット番号"
-                }
-                className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-sm"
-              />
+              {selectedBrand === "onepiece" ? (
+                <CardNameAutocomplete
+                  value={cardName}
+                  onChange={(v) => {
+                    setCardName(v);
+                    setSelectedCardId(null);
+                  }}
+                  onSelect={handlePickCard}
+                  brand={selectedBrand}
+                  placeholder="例: ナミ または OP09-050"
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={cardName}
+                  onChange={(e) => setCardName(e.target.value)}
+                  placeholder={
+                    selectedBrand === "pokemon" ? "例: リザードン SAR SV6-103" :
+                    selectedBrand === "yugioh" ? "例: ブラック・マジシャン QCSE-JP001" :
+                    "例: カード名 セット番号"
+                  }
+                  className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-sm"
+                />
+              )}
               <p className="mt-1 text-xs text-gray-400">
-                入力するとeBayの最近のSold価格を表示します
+                {selectedBrand === "onepiece"
+                  ? "型番(OP09-050)または名前で検索 → 候補から選択"
+                  : "入力するとeBayの最近のSold価格を表示します"}
               </p>
             </div>
           )}
