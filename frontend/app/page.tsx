@@ -1,18 +1,9 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import {
-  gradeCard,
-  getBrands,
-  preprocessImage,
-  suggestCards,
-  GradeResult,
-  Brand,
-  CardSuggestion,
-} from "../lib/api";
+import { gradeCard, getBrands, preprocessImage, GradeResult, Brand } from "../lib/api";
 import GradeResultView from "../components/result/GradeResultView";
 import CenteringEditor from "../components/centering/CenteringEditor";
-import CardSuggestions from "../components/cards/CardSuggestions";
 
 type AppStep = "upload" | "centering" | "result";
 
@@ -32,11 +23,6 @@ export default function Home() {
   const [selectedBrand, setSelectedBrand] = useState("");
   const [selectedRarity, setSelectedRarity] = useState("");
   const [cardName, setCardName] = useState("");
-  const [suggestions, setSuggestions] = useState<CardSuggestion[]>([]);
-  const [suggestMatchType, setSuggestMatchType] = useState<"ocr" | "phash" | null>(null);
-  const [suggestDetectedCode, setSuggestDetectedCode] = useState<string | null>(null);
-  const [suggestLoading, setSuggestLoading] = useState(false);
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
   useEffect(() => {
     getBrands().then(setBrands).catch(() => {});
@@ -69,42 +55,14 @@ export default function Home() {
     if (!file) return;
     setLoading(true);
     setError(null);
-    setSuggestions([]);
-    setSelectedCardId(null);
     try {
       const preprocessed = await preprocessImage(file);
       setCorrectedImage(`data:image/jpeg;base64,${preprocessed.card_image}`);
       setStep("centering");
-      // 候補カードを並列でフェッチ（失敗してもメインフローは止めない）
-      if (selectedBrand === "onepiece") {
-        setSuggestLoading(true);
-        setSuggestMatchType(null);
-        setSuggestDetectedCode(null);
-        suggestCards(file, selectedBrand, 5)
-          .then((r) => {
-            setSuggestions(r.candidates);
-            setSuggestMatchType(r.match_type);
-            setSuggestDetectedCode(r.detected_code);
-          })
-          .catch(() => setSuggestions([]))
-          .finally(() => setSuggestLoading(false));
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "前処理に失敗しました");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handlePickSuggestion = (c: CardSuggestion | null) => {
-    if (!c) {
-      setSelectedCardId(null);
-      return;
-    }
-    setSelectedCardId(c.card_id);
-    // カード名フィールドを自動補完（ユーザーが既に入力済みなら上書きしない）
-    if (!cardName.trim()) {
-      setCardName(`${c.name_ja} ${c.set_code}-${c.card_no} ${c.rarity}`);
     }
   };
 
@@ -116,10 +74,6 @@ export default function Home() {
     setStep("upload");
     setManualCentering(null);
     setCorrectedImage(null);
-    setSuggestions([]);
-    setSuggestMatchType(null);
-    setSuggestDetectedCode(null);
-    setSelectedCardId(null);
   };
 
   // センタリングエディターからの結果で鑑定開始
@@ -182,18 +136,6 @@ export default function Home() {
           >
             ← 戻る
           </button>
-          {(suggestLoading || suggestions.length > 0) && (
-            <div className="mb-4">
-              <CardSuggestions
-                candidates={suggestions}
-                selectedCardId={selectedCardId}
-                onSelect={handlePickSuggestion}
-                loading={suggestLoading}
-                matchType={suggestMatchType ?? undefined}
-                detectedCode={suggestDetectedCode}
-              />
-            </div>
-          )}
           <CenteringEditor
             imageSrc={correctedImage || preview!}
             onComplete={(r) => handleCenteringComplete(r as unknown as Record<string, unknown>)}
@@ -433,12 +375,7 @@ export default function Home() {
           >
             ← 新しいカードを鑑定
           </button>
-          <GradeResultView
-            result={result}
-            cardName={cardName}
-            brand={selectedBrand}
-            cardId={selectedCardId ?? undefined}
-          />
+          <GradeResultView result={result} cardName={cardName} brand={selectedBrand} />
         </div>
       ) : step === "result" && loading ? (
         <div className="max-w-2xl mx-auto text-center py-20">
