@@ -7,6 +7,8 @@ interface Props {
   selectedCardId: string | null;
   onSelect: (c: CardSuggestion | null) => void;
   loading: boolean;
+  matchType?: "ocr" | "phash";
+  detectedCode?: string | null;
 }
 
 const VARIANT_LABEL: Record<string, string> = {
@@ -23,6 +25,8 @@ export default function CardSuggestions({
   selectedCardId,
   onSelect,
   loading,
+  matchType,
+  detectedCode,
 }: Props) {
   if (loading) {
     return (
@@ -48,10 +52,23 @@ export default function CardSuggestions({
     <div className="border rounded-lg p-3 bg-blue-50 border-blue-200">
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-medium">
-          このカードですか？
-          <span className="text-xs text-gray-500 ml-2">
-            画像から候補を検出しました
-          </span>
+          {matchType === "ocr" && detectedCode ? (
+            <>
+              型番 <span className="font-mono text-blue-700">{detectedCode}</span> を認識
+              <span className="text-xs text-gray-500 ml-2">
+                バリアントを選んでください
+              </span>
+            </>
+          ) : (
+            <>
+              このカードですか？
+              <span className="text-xs text-gray-500 ml-2">
+                {detectedCode
+                  ? `（型番 ${detectedCode} はDBに未登録 / 画像で類似検索）`
+                  : "画像から候補を検出しました"}
+              </span>
+            </>
+          )}
         </div>
         {selectedCardId && (
           <button

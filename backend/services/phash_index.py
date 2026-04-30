@@ -152,5 +152,48 @@ class PhashIndex:
         return result
 
 
+    async def find_by_code(
+        self,
+        set_code: str,
+        card_no: str,
+        brand: Optional[str] = None,
+    ) -> list[dict]:
+        """型番一致のカードを全variant返す。OCR matchから直接呼ばれる用途。
+        キャッシュは pHash 用なので、ここは Supabase REST に直接問い合わせる。
+        """
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            return []
+        select = "id,brand,set_code,card_no,variant,rarity,name_ja,image_url"
+        url = (
+            f"{SUPABASE_URL}/rest/v1/cards"
+            f"?select={select}"
+            f"&set_code=eq.{set_code}"
+            f"&card_no=eq.{card_no}"
+        )
+        if brand:
+            url += f"&brand=eq.{brand}"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+        }
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=headers, timeout=10)
+            res.raise_for_status()
+            rows = res.json()
+        return [
+            {
+                "card_id": r["id"],
+                "set_code": r["set_code"],
+                "card_no": r["card_no"],
+                "variant": r.get("variant", "normal"),
+                "rarity": r.get("rarity", ""),
+                "name_ja": r.get("name_ja", ""),
+                "image_url": r.get("image_url"),
+                "distance": 0,  # OCR完全一致
+            }
+            for r in rows
+        ]
+
+
 # モジュール単一インスタンス
 phash_index = PhashIndex()

@@ -136,11 +136,17 @@ export interface CardSuggestion {
   distance: number;
 }
 
+export interface SuggestCardsResult {
+  candidates: CardSuggestion[];
+  match_type: "ocr" | "phash";
+  detected_code: string | null;
+}
+
 export async function suggestCards(
   frontImage: File,
   brand: string = "onepiece",
   limit: number = 5
-): Promise<CardSuggestion[]> {
+): Promise<SuggestCardsResult> {
   const formData = new FormData();
   formData.append("front_image", frontImage);
   formData.append("brand", brand);
@@ -150,9 +156,15 @@ export async function suggestCards(
     method: "POST",
     body: formData,
   });
-  if (!res.ok) return [];
+  if (!res.ok) {
+    return { candidates: [], match_type: "phash", detected_code: null };
+  }
   const data = await res.json();
-  return data.candidates || [];
+  return {
+    candidates: data.candidates || [],
+    match_type: data.match_type || "phash",
+    detected_code: data.detected_code ?? null,
+  };
 }
 
 export interface EbaySoldItem {

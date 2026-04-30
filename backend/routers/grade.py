@@ -187,10 +187,10 @@ async def suggest_cards(
     brand: str = Form("onepiece"),
     limit: int = Form(5),
 ):
-    """画像pHashで価格DBから類似カードTOPを返す。
+    """カード写真からDBの該当カード候補を返す。
 
-    - 入力: 鑑定写真（生のJPEG/PNG）。preprocess済み画像でもOK。
-    - 内部で正面化を試みる（失敗時は生画像でもfall back）→ pHash → DBの最近傍を返す
+    1) 正面化 → 型番OCR → DB完全一致（distance=0、全variant）
+    2) OCR失敗時は pHash 近傍で fallback（distance付き）
     """
     if front_image.content_type not in ("image/jpeg", "image/png", "image/webp"):
         raise HTTPException(400, "対応画像形式: JPEG, PNG, WebP")
@@ -204,13 +204,13 @@ async def suggest_cards(
     if image is None:
         raise HTTPException(400, "画像のデコードに失敗しました")
 
-    # 大きい場合は1200pxに縮小
+    # 1600px に抑える（OCR用は解像度を犠牲にしない）
     h, w = image.shape[:2]
-    if max(h, w) > 1200:
-        scale = 1200 / max(h, w)
+    if max(h, w) > 1600:
+        scale = 1600 / max(h, w)
         image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-    # 正面化を試みる（失敗時はそのまま使う）
+    # 正面化（失敗時は元画像）
     try:
         from ..services.preprocessing import detect_card
 
@@ -219,12 +219,30 @@ async def suggest_cards(
     except Exception:
         normalized = image
 
+    from ..services.ocr import extract_card_code
     from ..services.phash import compute_phash
     from ..services.phash_index import phash_index
 
+    # 1) OCR で型番抽出
+    code = extract_card_code(normalized)
+    if code:
+        set_code, card_no = code.split("-", 1)
+        rows = await phash_index.find_by_code(set_code, card_no, brand=brand or None)
+        if rows:
+            return {
+                "candidates": rows[:limit],
+                "match_type": "ocr",
+                "detected_code": code,
+            }
+
+    # 2) pHash fallback
     query = compute_phash(normalized)
     candidates = await phash_index.nearest(query, brand=brand or None, limit=limit)
-    return {"candidates": candidates}
+    return {
+        "candidates": candidates,
+        "match_type": "phash",
+        "detected_code": code,  # 読めたが該当なしの場合の参考表示
+    }
 
 
 @router.get("/ebay/sold")

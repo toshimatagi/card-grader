@@ -33,6 +33,8 @@ export default function Home() {
   const [selectedRarity, setSelectedRarity] = useState("");
   const [cardName, setCardName] = useState("");
   const [suggestions, setSuggestions] = useState<CardSuggestion[]>([]);
+  const [suggestMatchType, setSuggestMatchType] = useState<"ocr" | "phash" | null>(null);
+  const [suggestDetectedCode, setSuggestDetectedCode] = useState<string | null>(null);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
@@ -76,8 +78,14 @@ export default function Home() {
       // 候補カードを並列でフェッチ（失敗してもメインフローは止めない）
       if (selectedBrand === "onepiece") {
         setSuggestLoading(true);
+        setSuggestMatchType(null);
+        setSuggestDetectedCode(null);
         suggestCards(file, selectedBrand, 5)
-          .then((c) => setSuggestions(c))
+          .then((r) => {
+            setSuggestions(r.candidates);
+            setSuggestMatchType(r.match_type);
+            setSuggestDetectedCode(r.detected_code);
+          })
           .catch(() => setSuggestions([]))
           .finally(() => setSuggestLoading(false));
       }
@@ -109,6 +117,8 @@ export default function Home() {
     setManualCentering(null);
     setCorrectedImage(null);
     setSuggestions([]);
+    setSuggestMatchType(null);
+    setSuggestDetectedCode(null);
     setSelectedCardId(null);
   };
 
@@ -179,6 +189,8 @@ export default function Home() {
                 selectedCardId={selectedCardId}
                 onSelect={handlePickSuggestion}
                 loading={suggestLoading}
+                matchType={suggestMatchType ?? undefined}
+                detectedCode={suggestDetectedCode}
               />
             </div>
           )}
