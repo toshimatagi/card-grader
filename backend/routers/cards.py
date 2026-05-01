@@ -6,7 +6,9 @@ import os
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+
+from ..services import gemini_identify
 
 router = APIRouter(prefix="/api/v1/cards", tags=["cards"])
 
@@ -113,6 +115,45 @@ async def get_card_by_code(code: str) -> dict:
     return {
         "code": f"{set_code}-{card_no}",
         "cards": result_cards,
+    }
+
+
+@router.post("/identify")
+async def identify_card_endpoint(front_image: UploadFile = File(...)) -> dict:
+    """画像から型番・カード名を Gemini Vision で識別し、DBで照合して詳細を返す"""
+    image_bytes = await front_image.read()
+    if not image_bytes:
+        raise HTTPException(400, "画像が空です")
+    mime = front_image.content_type or "image/jpeg"
+
+    result = await gemini_identify.identify_card(image_bytes, mime)
+    if result.get("error"):
+        raise HTTPException(503, result["error"])
+
+    set_code = result.get("set_code")
+    card_no = result.get("card_no")
+
+    matched_cards: list[dict] = []
+    code: Optional[str] = None
+    if set_code and card_no:
+        code = f"{set_code}-{card_no}"
+        select = "id,brand,set_code,card_no,variant,rarity,name_ja,image_url"
+        try:
+            matched_cards = await _sb_get(
+                "cards",
+                f"set_code=eq.{set_code}&card_no=eq.{card_no}&select={select}&order=variant.asc,rarity.asc",
+            )
+        except HTTPException:
+            matched_cards = []
+
+    return {
+        "code": code,
+        "set_code": set_code,
+        "card_no": card_no,
+        "name_ja": result.get("name_ja"),
+        "rarity": result.get("rarity"),
+        "confidence": result.get("confidence"),
+        "matched": matched_cards,
     }
 
 

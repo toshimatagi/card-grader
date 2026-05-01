@@ -142,6 +142,47 @@ export interface SuggestCardsResult {
   detected_code: string | null;
 }
 
+export interface IdentifyMatch {
+  id: string;
+  brand: string;
+  set_code: string;
+  card_no: string;
+  variant: string;
+  rarity: string;
+  name_ja: string;
+  image_url: string | null;
+}
+
+export interface IdentifyCardResult {
+  code: string | null;
+  set_code: string | null;
+  card_no: string | null;
+  name_ja: string | null;
+  rarity: string | null;
+  confidence: number;
+  matched: IdentifyMatch[];
+}
+
+export async function identifyCard(
+  frontImage: File
+): Promise<IdentifyCardResult | { error: string }> {
+  const formData = new FormData();
+  formData.append("front_image", frontImage);
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/cards/identify`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { error: err.detail || `API ${res.status}` };
+    }
+    return await res.json();
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "通信エラー" };
+  }
+}
+
 export async function suggestCards(
   frontImage: File,
   brand: string = "onepiece",
