@@ -392,6 +392,33 @@ export default function Home() {
               "鑑定開始"
             )}
           </button>
+
+          {/* 価格DB / 値上がりへの動線 */}
+          <div className="mt-10 pt-8 border-t border-gray-200">
+            <p className="text-xs text-gray-500 mb-3 text-center">他の機能</p>
+            <div className="grid grid-cols-2 gap-3">
+              <a
+                href="/cards"
+                className="block border border-gray-200 rounded-lg p-4 hover:border-blue-400 hover:bg-blue-50 transition-colors"
+              >
+                <div className="text-2xl mb-1">📚</div>
+                <div className="font-bold text-sm">カード価格DB</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  全カードの最新相場 (中央値)
+                </div>
+              </a>
+              <a
+                href="/trending"
+                className="block border border-gray-200 rounded-lg p-4 hover:border-red-400 hover:bg-red-50 transition-colors"
+              >
+                <div className="text-2xl mb-1">📈</div>
+                <div className="font-bold text-sm">値上がりランキング</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  24h / 7日 / 30日の騰落率
+                </div>
+              </a>
+            </div>
+          </div>
         </div>
       ) : step === "result" && result ? (
         <div>

@@ -1,8 +1,59 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { getCardByCode, type CardVariant } from "../../../lib/api";
 import PriceChart from "../../../components/cards/PriceChart";
 
 export const dynamic = "force-dynamic";
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}): Promise<Metadata> {
+  const { code } = await params;
+  let data;
+  try {
+    data = await getCardByCode(code);
+  } catch {
+    return { title: `${code} - カードが見つかりません` };
+  }
+  if (!data || data.cards.length === 0) return { title: `${code} - カードが見つかりません` };
+
+  const first = data.cards[0];
+  const codeUpper = data.code;
+  const variants = data.cards
+    .map((c) => {
+      const sell = c.sell_price != null ? `¥${c.sell_price.toLocaleString()}` : "-";
+      const buy = c.buy_price != null ? `¥${c.buy_price.toLocaleString()}` : "-";
+      return `${VARIANT_LABEL[c.variant] ?? c.variant}: 販売${sell}/買取${buy}`;
+    })
+    .join(" / ");
+
+  const title = `${first.name_ja} (${codeUpper}) 価格相場`;
+  const description = `ワンピースカード「${first.name_ja}」(${codeUpper}) の最新相場。${variants}。複数の取扱いサイトから集計した中央値を表示。`;
+
+  const url = `${SITE_URL}/cards/${codeUpper}`;
+  return {
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      type: "website",
+      url,
+      title,
+      description,
+      ...(first.image_url ? { images: [{ url: first.image_url, width: 480, height: 672, alt: first.name_ja }] } : {}),
+    },
+    twitter: {
+      card: first.image_url ? "summary_large_image" : "summary",
+      title,
+      description,
+      ...(first.image_url ? { images: [first.image_url] } : {}),
+    },
+  };
+}
 
 const VARIANT_LABEL: Record<string, string> = {
   normal: "通常",
@@ -40,8 +91,32 @@ export default async function CardDetailPage({
   const sellSeries = buildSeries(data.cards, "sell");
   const buySeries = buildSeries(data.cards, "buy");
 
+  // JSON-LD 構造化データ (Product schema)
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: `${data.cards[0].name_ja} (${data.code})`,
+    sku: data.code,
+    image: data.cards.map((c) => c.image_url).filter(Boolean),
+    brand: { "@type": "Brand", name: "ONE PIECE Card Game" },
+    offers: data.cards
+      .filter((c) => c.sell_price != null)
+      .map((c) => ({
+        "@type": "Offer",
+        priceCurrency: "JPY",
+        price: c.sell_price,
+        availability: "https://schema.org/InStock",
+        itemCondition: "https://schema.org/NewCondition",
+        name: `${VARIANT_LABEL[c.variant] ?? c.variant} ${c.rarity}`,
+      })),
+  };
+
   return (
     <div>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <nav className="text-sm text-gray-500 mb-2">
         <a href="/cards" className="hover:underline">価格DB</a>
         <span className="mx-2">/</span>

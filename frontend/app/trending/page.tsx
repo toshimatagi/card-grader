@@ -18,6 +18,14 @@ const PRICE_TYPES = [
   { key: "buy", label: "買取価格" },
 ] as const;
 
+const SORTS = [
+  { key: "rate", label: "上昇率順" },
+  { key: "diff", label: "上昇額順" },
+  { key: "price", label: "現在価格順" },
+] as const;
+
+const LIMITS = [50, 100, 200] as const;
+
 const VARIANT_LABEL: Record<string, string> = {
   normal: "通常",
   parallel: "パラレル",
@@ -27,7 +35,18 @@ const VARIANT_LABEL: Record<string, string> = {
   other: "その他",
 };
 
-type SearchParams = { period?: string; type?: string };
+type SearchParams = {
+  period?: string;
+  type?: string;
+  sort?: string;
+  limit?: string;
+};
+
+function buildHref(base: Record<string, string>, override: Record<string, string>) {
+  const merged = { ...base, ...override };
+  const qs = new URLSearchParams(merged).toString();
+  return `/trending?${qs}`;
+}
 
 export async function generateMetadata({
   searchParams,
@@ -38,7 +57,7 @@ export async function generateMetadata({
   const period = PERIODS.find((p) => p.key === sp.period) ?? PERIODS[1];
   const ptype = PRICE_TYPES.find((p) => p.key === sp.type) ?? PRICE_TYPES[0];
   const title = `ワンピカード ${period.label}の値上がりランキング (${ptype.label})`;
-  const description = `ワンピースカードゲームの${period.label}で${ptype.label}が上昇したカードTOP50。複数の取扱いサイトから集計した中央値ベース。`;
+  const description = `ワンピースカードゲームの${period.label}で${ptype.label}が上昇したカードランキング。複数の取扱いサイトから集計した中央値ベース。`;
   return {
     title,
     description,
@@ -55,24 +74,46 @@ export default async function TrendingPage({
   const sp = await searchParams;
   const period = PERIODS.find((p) => p.key === sp.period) ?? PERIODS[1];
   const ptype = PRICE_TYPES.find((p) => p.key === sp.type) ?? PRICE_TYPES[0];
+  const sort = SORTS.find((s) => s.key === sp.sort) ?? SORTS[0];
+  const limitNum = Number(sp.limit);
+  const limit = (LIMITS as readonly number[]).includes(limitNum) ? limitNum : 50;
+
+  const baseParams: Record<string, string> = {
+    period: period.key,
+    type: ptype.key,
+    sort: sort.key,
+    limit: String(limit),
+  };
 
   let items: TrendingCard[] = [];
   let error: string | null = null;
   try {
+    // 上位の母集団を多めに取り、フロントで並び替えて表示
     items = await getTrending({
       periodHours: period.hours,
       priceType: ptype.key,
-      limit: 50,
+      limit: Math.max(limit, 200),
     });
   } catch (e) {
     error = e instanceof Error ? e.message : "取得に失敗しました";
   }
 
+  const sorted = [...items].sort((a, b) => {
+    if (sort.key === "diff") {
+      return (b.now_price - b.past_price) - (a.now_price - a.past_price);
+    }
+    if (sort.key === "price") {
+      return b.now_price - a.now_price;
+    }
+    return b.pct_change - a.pct_change;
+  });
+  const display = sorted.slice(0, limit);
+
   return (
     <div>
       <h1 className="text-2xl font-bold mb-2">値上がりランキング</h1>
       <p className="text-sm text-gray-600 mb-6">
-        指定期間で{ptype.label}の中央値が上昇したカードTOP50。
+        指定期間で{ptype.label}の中央値が上昇したカードを表示。
       </p>
 
       {/* 期間タブ */}
@@ -80,7 +121,7 @@ export default async function TrendingPage({
         {PERIODS.map((p) => (
           <Link
             key={p.key}
-            href={`/trending?period=${p.key}&type=${ptype.key}`}
+            href={buildHref(baseParams, { period: p.key })}
             scroll={false}
             className={`px-3 py-1.5 rounded-full text-sm border ${
               p.key === period.key
@@ -94,11 +135,11 @@ export default async function TrendingPage({
       </div>
 
       {/* 価格種別タブ */}
-      <div className="flex gap-2 mb-6 flex-wrap">
+      <div className="flex gap-2 mb-3 flex-wrap">
         {PRICE_TYPES.map((t) => (
           <Link
             key={t.key}
-            href={`/trending?period=${period.key}&type=${t.key}`}
+            href={buildHref(baseParams, { type: t.key })}
             scroll={false}
             className={`px-3 py-1.5 rounded-full text-xs border ${
               t.key === ptype.key
@@ -111,21 +152,58 @@ export default async function TrendingPage({
         ))}
       </div>
 
+      {/* ソートタブ */}
+      <div className="flex gap-2 mb-3 flex-wrap">
+        {SORTS.map((s) => (
+          <Link
+            key={s.key}
+            href={buildHref(baseParams, { sort: s.key })}
+            scroll={false}
+            className={`px-3 py-1.5 rounded-full text-xs border ${
+              s.key === sort.key
+                ? "bg-emerald-600 text-white border-emerald-600"
+                : "bg-white text-gray-700 border-gray-300 hover:border-gray-400"
+            }`}
+          >
+            {s.label}
+          </Link>
+        ))}
+      </div>
+
+      {/* 件数切替 */}
+      <div className="flex gap-2 mb-6 flex-wrap items-center">
+        <span className="text-xs text-gray-500">表示件数:</span>
+        {LIMITS.map((n) => (
+          <Link
+            key={n}
+            href={buildHref(baseParams, { limit: String(n) })}
+            scroll={false}
+            className={`px-2.5 py-1 rounded text-xs border ${
+              n === limit
+                ? "bg-gray-700 text-white border-gray-700"
+                : "bg-white text-gray-700 border-gray-300 hover:border-gray-400"
+            }`}
+          >
+            {n}
+          </Link>
+        ))}
+      </div>
+
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
           データの取得に失敗しました: {error}
         </div>
       )}
 
-      {!error && items.length === 0 && (
+      {!error && display.length === 0 && (
         <p className="text-gray-500">
           この期間で集計可能なデータがまだ十分にありません。
         </p>
       )}
 
-      {items.length > 0 && (
+      {display.length > 0 && (
         <ol className="space-y-2">
-          {items.map((c, i) => {
+          {display.map((c, i) => {
             const code = `${c.set_code}-${c.card_no}`;
             const up = c.pct_change >= 0;
             const diff = c.now_price - c.past_price;
@@ -146,7 +224,9 @@ export default async function TrendingPage({
                       loading="lazy"
                     />
                   ) : (
-                    <div className="w-12 aspect-[5/7] bg-gray-200 rounded" />
+                    <div className="w-12 aspect-[5/7] bg-gray-100 rounded flex items-center justify-center text-[8px] text-gray-400">
+                      No Img
+                    </div>
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-bold truncate">

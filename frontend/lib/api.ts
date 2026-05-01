@@ -234,7 +234,29 @@ export interface CardSummary {
   image_url: string | null;
 }
 
+export interface CardSummaryWithPrice extends CardSummary {
+  sell_price: number | null;
+  buy_price: number | null;
+}
+
 import { sbGet, sbRpc } from "./supabase";
+
+function cleanImageUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const u = url.trim();
+  if (!u) return null;
+  const lower = u.toLowerCase();
+  if (
+    lower.includes("spacer.gif") ||
+    lower.includes("noimage") ||
+    lower.includes("no_image") ||
+    lower.includes("no-image") ||
+    lower.endsWith("/blank.gif")
+  ) {
+    return null;
+  }
+  return u;
+}
 
 export interface TrendingCard {
   card_id: string;
@@ -255,17 +277,19 @@ export async function getTrending(params: {
   priceType?: "sell" | "buy";
   limit?: number;
 }): Promise<TrendingCard[]> {
-  return sbRpc<TrendingCard[]>("trending_cards", {
+  const items = await sbRpc<TrendingCard[]>("trending_cards", {
     p_brand: params.brand ?? "onepiece",
     p_period_hours: params.periodHours,
     p_price_type: params.priceType ?? "sell",
     p_limit: params.limit ?? 50,
   });
+  return items.map((c) => ({ ...c, image_url: cleanImageUrl(c.image_url) }));
 }
 
 export async function searchCards(params: {
   brand?: string;
   set_code?: string;
+  rarity?: string;
   q?: string;
   limit?: number;
   offset?: number;
@@ -276,6 +300,7 @@ export async function searchCards(params: {
 
   const filters = [`brand=eq.${brand}`];
   if (params.set_code) filters.push(`set_code=eq.${params.set_code.toUpperCase()}`);
+  if (params.rarity) filters.push(`rarity=eq.${params.rarity}`);
   if (params.q) filters.push(`name_ja=ilike.*${params.q}*`);
 
   const select = "id,brand,set_code,card_no,variant,rarity,name_ja,image_url";
@@ -286,7 +311,69 @@ export async function searchCards(params: {
     `&limit=${limit}&offset=${offset}`;
 
   const items = await sbGet<CardSummary[]>("cards", qs);
-  return { items, count: items.length };
+  const cleaned = items.map((c) => ({ ...c, image_url: cleanImageUrl(c.image_url) }));
+  return { items: cleaned, count: cleaned.length };
+}
+
+export async function attachLatestPrices(
+  cards: CardSummary[],
+  periodHours: number = 168
+): Promise<CardSummaryWithPrice[]> {
+  if (cards.length === 0) return [];
+
+  const since = new Date(Date.now() - periodHours * 3600 * 1000).toISOString();
+  const PRICE_FLOOR = 10;
+  const CHUNK = 100;
+  const allSnaps: PriceSnapshot[] = [];
+
+  for (let i = 0; i < cards.length; i += CHUNK) {
+    const chunk = cards.slice(i, i + CHUNK);
+    const ids = chunk.map((c) => c.id).join(",");
+    const snaps = await sbGet<PriceSnapshot[]>(
+      "price_snapshots",
+      `card_id=in.(${ids})` +
+        `&captured_at=gte.${since}` +
+        `&select=card_id,source,captured_at,price_type,price,stock_status` +
+        `&limit=20000`
+    );
+    allSnaps.push(...snaps);
+  }
+
+  const valid = allSnaps.filter(
+    (s) =>
+      s.price != null &&
+      s.price >= PRICE_FLOOR &&
+      s.stock_status !== "out_of_stock"
+  );
+
+  const byCard = new Map<string, PriceSnapshot[]>();
+  for (const s of valid) {
+    const list = byCard.get(s.card_id);
+    if (list) list.push(s);
+    else byCard.set(s.card_id, [s]);
+  }
+
+  return cards.map((c) => ({
+    ...c,
+    sell_price: latestPerSourceAggregate(byCard.get(c.id) ?? [], "sell"),
+    buy_price: latestPerSourceAggregate(byCard.get(c.id) ?? [], "buy"),
+  }));
+}
+
+export async function listRarities(brand: string = "onepiece"): Promise<string[]> {
+  const PAGE = 1000;
+  const all: { rarity: string }[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const chunk = await sbGet<{ rarity: string }[]>(
+      "cards",
+      `brand=eq.${brand}&select=rarity&limit=${PAGE}&offset=${offset}`
+    );
+    all.push(...chunk);
+    if (chunk.length < PAGE) break;
+  }
+  const uniq = Array.from(new Set(all.map((r) => r.rarity).filter(Boolean)));
+  uniq.sort();
+  return uniq;
 }
 
 export async function getCardByCode(code: string): Promise<CardByCodeResult> {
@@ -331,6 +418,7 @@ export async function getCardByCode(code: string): Promise<CardByCodeResult> {
     const all = byCard.get(c.id) ?? [];
     return {
       ...c,
+      image_url: cleanImageUrl(c.image_url),
       sell_price: latestPerSourceAggregate(all, "sell"),
       buy_price: latestPerSourceAggregate(all, "buy"),
       history: [
