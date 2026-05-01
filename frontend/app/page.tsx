@@ -5,6 +5,7 @@ import { gradeCard, getBrands, preprocessImage, GradeResult, Brand, CardSummary 
 import GradeResultView from "../components/result/GradeResultView";
 import CenteringEditor from "../components/centering/CenteringEditor";
 import CardNameAutocomplete from "../components/cards/CardNameAutocomplete";
+import CameraCapture from "../components/camera/CameraCapture";
 
 type AppStep = "upload" | "centering" | "result";
 
@@ -18,6 +19,7 @@ export default function Home() {
   const [step, setStep] = useState<AppStep>("upload");
   const [manualCentering, setManualCentering] = useState<Record<string, unknown> | null>(null);
   const [correctedImage, setCorrectedImage] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   // ブランド・レアリティ選択
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -138,6 +140,16 @@ export default function Home() {
 
   return (
     <div>
+      {cameraOpen && (
+        <CameraCapture
+          onCapture={(f) => {
+            handleFile(f);
+            setCameraOpen(false);
+          }}
+          onClose={() => setCameraOpen(false)}
+        />
+      )}
+
       {/* Step 2: センタリングエディター */}
       {step === "centering" && (correctedImage || preview) && (
         <div className="max-w-2xl mx-auto">
@@ -240,6 +252,20 @@ export default function Home() {
               </div>
             )}
           </div>
+
+          {/* カメラで撮影ボタン (主にスマホ向け、PCでも内蔵カメラで動作) */}
+          {!preview && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setCameraOpen(true);
+              }}
+              className="mt-3 w-full py-3 rounded-lg border-2 border-blue-500 text-blue-600 font-medium hover:bg-blue-50 transition-colors flex items-center justify-center gap-2"
+            >
+              📷 カメラで撮影 (枠ガイド・水平表示付き)
+            </button>
+          )}
 
           {/* ブランド選択 */}
           <div className="mt-6">
