@@ -66,13 +66,51 @@ export default function CameraCapture({
   }, []);
 
   // 端末傾き (水平インジケータ用)
+  // beta: 前後傾き (画面が天井向きで90°)
+  // gamma: 左右傾き (-90°〜90°)
+  // 「カードを机に置いて真上から撮る」= 画面が地面と平行下向き = beta ≈ 0、gamma ≈ 0
+  // (注: iOS/Androidで揺れが大きいため低域通過で平滑化)
   useEffect(() => {
+    let lastPitch = 0;
+    let lastRoll = 0;
+    let initialized = false;
+    const ALPHA = 0.25; // 平滑化係数
     const handler = (e: DeviceOrientationEvent) => {
-      // beta: 前後傾き (X軸), gamma: 左右傾き (Y軸)。スマホを縦持ちした時の値。
       if (e.beta == null || e.gamma == null) return;
-      // 真上から撮るとき beta ≈ 90 (画面が水平), gamma ≈ 0
-      // 平面に対する傾きを表示するため beta - 90 を pitch として表示
-      setTilt({ pitch: e.beta - 90, roll: e.gamma });
+      // 画面回転 (横持ち) を考慮: window.orientation で軸を補正
+      const screenAngle =
+        (window.screen?.orientation?.angle ??
+          (typeof window.orientation === "number" ? window.orientation : 0)) || 0;
+      let rawPitch: number;
+      let rawRoll: number;
+      // 縦持ち基準。横持ち時は beta/gamma を入れ替え＆符号反転
+      switch (screenAngle) {
+        case 90:
+          rawPitch = -e.gamma;
+          rawRoll = e.beta;
+          break;
+        case -90:
+        case 270:
+          rawPitch = e.gamma;
+          rawRoll = -e.beta;
+          break;
+        case 180:
+          rawPitch = -e.beta;
+          rawRoll = -e.gamma;
+          break;
+        default:
+          rawPitch = e.beta;
+          rawRoll = e.gamma;
+      }
+      if (!initialized) {
+        lastPitch = rawPitch;
+        lastRoll = rawRoll;
+        initialized = true;
+      } else {
+        lastPitch = lastPitch * (1 - ALPHA) + rawPitch * ALPHA;
+        lastRoll = lastRoll * (1 - ALPHA) + rawRoll * ALPHA;
+      }
+      setTilt({ pitch: lastPitch, roll: lastRoll });
     };
     window.addEventListener("deviceorientation", handler);
     return () => window.removeEventListener("deviceorientation", handler);
@@ -141,9 +179,12 @@ export default function CameraCapture({
     }
   }, [ready, onCapture]);
 
-  // 水平判定
+  // 水平判定 (机置き真上撮影想定: pitch≈0, roll≈0)
+  const TILT_THRESHOLD = 10; // 度
   const tiltOk =
-    tilt != null && Math.abs(tilt.pitch) <= 8 && Math.abs(tilt.roll) <= 8;
+    tilt != null &&
+    Math.abs(tilt.pitch) <= TILT_THRESHOLD &&
+    Math.abs(tilt.roll) <= TILT_THRESHOLD;
   const tiltActive = tilt != null;
 
   return (
@@ -156,18 +197,20 @@ export default function CameraCapture({
         >
           ✕ 閉じる
         </button>
-        <div className="text-xs text-center flex-1 px-2">
+        <div className="text-center flex-1 px-2">
           {tiltActive ? (
-            <span
-              className={tiltOk ? "text-green-400" : "text-yellow-300"}
-            >
-              {tiltOk ? "● 水平 OK" : "▲ 傾き調整中"} pitch{" "}
-              {tilt!.pitch.toFixed(0)}° / roll {tilt!.roll.toFixed(0)}°
-            </span>
+            <div className={tiltOk ? "text-green-400" : "text-yellow-300"}>
+              <div className="text-sm font-bold">
+                {tiltOk ? "● 水平 OK" : "▲ 傾き調整中"}
+              </div>
+              <div className="text-[10px] text-white/70 mt-0.5">
+                前後 {Math.round(tilt!.pitch)}° / 左右 {Math.round(tilt!.roll)}°
+              </div>
+            </div>
           ) : orientationPermission === "unknown" ? (
             <button
               onClick={requestOrientation}
-              className="px-2 py-1 bg-white/10 rounded text-xs"
+              className="px-3 py-1.5 bg-blue-600 rounded text-xs font-medium"
             >
               水平センサーを有効化
             </button>
@@ -322,22 +365,40 @@ function HorizonBubble({
   roll: number;
   ok: boolean;
 }) {
-  // バブル位置: roll で水平方向、pitch で垂直方向にずらす
-  // 中央 (50%, 50%) を 0 として、最大 ±40px ずらす
+  // カメラアプリ風: 中央に固定の基準線、端末の傾きに同期して動く可動線。
+  // - roll で線が回転 (右に傾けたら線が時計回りに見える)
+  // - pitch で線が上下にズレ (奥に傾けたら下に、手前に傾けたら上に)
   const clamp = (n: number, max: number) => Math.max(-max, Math.min(max, n));
-  const dx = (clamp(roll, 30) / 30) * 40;
-  const dy = (clamp(pitch, 30) / 30) * 40;
+  const dy = (clamp(pitch, 30) / 30) * 30; // 最大±30px
+  const rotation = clamp(roll, 45); // 最大±45°
+  const movingColor = ok ? "rgb(74, 222, 128)" : "rgb(253, 224, 71)";
+
   return (
-    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 rounded-full border border-white/40">
-      <div
-        className={`absolute left-1/2 top-1/2 w-4 h-4 -ml-2 -mt-2 rounded-full transition-all ${
-          ok ? "bg-green-400" : "bg-yellow-300"
-        }`}
-        style={{ transform: `translate(${dx}px, ${dy}px)` }}
+    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 pointer-events-none">
+      {/* 外周ターゲット円 */}
+      <div className="absolute inset-0 rounded-full border border-white/30" />
+
+      {/* 中央 (基準) 水平線 */}
+      <span className="absolute top-1/2 left-3 right-3 h-px -mt-px bg-white/40" />
+      {/* 中央点 */}
+      <span className="absolute left-1/2 top-1/2 w-1.5 h-1.5 -ml-[3px] -mt-[3px] rounded-full bg-white/80" />
+
+      {/* 可動線 (端末傾きに同期) */}
+      <span
+        className="absolute top-1/2 left-3 right-3 h-0.5 -mt-0.5 rounded-full transition-colors duration-150"
+        style={{
+          backgroundColor: movingColor,
+          transform: `translateY(${dy}px) rotate(${rotation}deg)`,
+          transformOrigin: "center",
+        }}
       />
-      {/* 中心十字 */}
-      <span className="absolute left-1/2 top-0 bottom-0 w-px -ml-px bg-white/30" />
-      <span className="absolute top-1/2 left-0 right-0 h-px -mt-px bg-white/30" />
+
+      {/* 水平OKチェック (中央) */}
+      {ok && (
+        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-green-400 text-2xl font-bold drop-shadow">
+          ✓
+        </span>
+      )}
     </div>
   );
 }
