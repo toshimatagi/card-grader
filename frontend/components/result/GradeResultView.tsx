@@ -4,6 +4,7 @@ import { useState } from "react";
 import { GradeResult } from "../../lib/api";
 import ScoreGauge from "./ScoreGauge";
 import CardPriceSummary from "../cards/CardPriceSummary";
+import BackSideCentering from "../centering/BackSideCentering";
 
 interface Props {
   result: GradeResult;
@@ -394,6 +395,14 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
           </DetailSection>
         </div>
       </div>
+
+      {/* 裏面センタリング (任意) */}
+      <BackSideCentering
+        frontCentering={{
+          lr_ratio: result.sub_grades.centering.detail.lr_ratio as string | undefined,
+          tb_ratio: result.sub_grades.centering.detail.tb_ratio as string | undefined,
+        }}
+      />
 
       {/* 価格DB（販売・買取の中央値） */}
       {cardCode && <CardPriceSummary code={cardCode} />}
