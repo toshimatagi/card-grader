@@ -349,6 +349,33 @@ def _trim_margins(card_image: np.ndarray) -> np.ndarray:
     return trimmed
 
 
+def find_card_bbox_in_normalized(card_image: np.ndarray) -> dict:
+    """正面化済み画像内のカード境界を 0-1 比率の bbox で返す。
+
+    preprocess (trim=False) 後の画像はカード矩形に近いが、わずかに背景や
+    歪みが残ることがある。各辺から走査してカード端を探し、CenteringEditor の
+    外枠初期値として使える bbox を返す。
+    """
+    h, w = card_image.shape[:2]
+    if h == 0 or w == 0:
+        return {"left": 0.0, "right": 1.0, "top": 0.0, "bottom": 1.0}
+    try:
+        gray = cv2.cvtColor(card_image, cv2.COLOR_BGR2GRAY)
+    except cv2.error:
+        return {"left": 0.0, "right": 1.0, "top": 0.0, "bottom": 1.0}
+    max_depth = max(int(min(h, w) * 0.10), 8)
+    left_off = _find_edge_from_side(gray, "left", max_depth)
+    right_off = _find_edge_from_side(gray, "right", max_depth)
+    top_off = _find_edge_from_side(gray, "top", max_depth)
+    bottom_off = _find_edge_from_side(gray, "bottom", max_depth)
+    return {
+        "left": left_off / w,
+        "right": (w - 1 - right_off) / w,
+        "top": top_off / h,
+        "bottom": (h - 1 - bottom_off) / h,
+    }
+
+
 def _find_edge_from_side(gray: np.ndarray, direction: str, max_depth: int) -> int:
     """指定方向から走査して、明度の大きな変化点（カード境界）を検出"""
     h, w = gray.shape

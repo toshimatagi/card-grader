@@ -19,6 +19,7 @@ export default function GradeApp() {
   const [step, setStep] = useState<AppStep>("upload");
   const [manualCentering, setManualCentering] = useState<Record<string, unknown> | null>(null);
   const [correctedImage, setCorrectedImage] = useState<string | null>(null);
+  const [outerBox, setOuterBox] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
 
   // ブランド・レアリティ選択
@@ -95,6 +96,7 @@ export default function GradeApp() {
     try {
       const preprocessed = await preprocessImage(file);
       setCorrectedImage(`data:image/jpeg;base64,${preprocessed.card_image}`);
+      setOuterBox(preprocessed.outer_box ?? null);
       setStep("centering");
     } catch (e) {
       setError(e instanceof Error ? e.message : "前処理に失敗しました");
@@ -111,6 +113,7 @@ export default function GradeApp() {
     setStep("upload");
     setManualCentering(null);
     setCorrectedImage(null);
+    setOuterBox(null);
     setSelectedCardId(null);
     setSelectedCardCode(null);
     setIdentifyResult(null);
@@ -202,6 +205,7 @@ export default function GradeApp() {
               return !!r && (!r.has_border || r.border_type === "none");
             })()}
             cardKind={selectedRarity === "l" ? "leader" : "character"}
+            initialOuter={outerBox}
           />
           {loading && (
             <div className="mt-4 text-center">

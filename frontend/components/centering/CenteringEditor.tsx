@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
 interface Pt { x: number; y: number; }
-interface Quad { tl: Pt; tr: Pt; bl: Pt; br: Pt; }
-interface QuadGuides { outer: Quad; inner: Quad; }
+interface Lines { left: number; right: number; top: number; bottom: number; }
+interface GuideLines { outer: Lines; inner: Lines; }
 
 type LandmarkKey = "cost" | "life" | "power" | "name_band";
+type LineKey = "left" | "right" | "top" | "bottom";
+type LineLayer = "outer" | "inner";
 
 interface CenteringResult {
   lr_ratio: string;
@@ -49,9 +51,9 @@ interface Props {
   onSkip: () => void;
   fullartMode?: boolean;
   cardKind?: "character" | "leader";
+  initialOuter?: Lines | null;  // preprocess の外枠自動検出値
 }
 
-// レイアウト種別ごとのランドマーク定義 (ラベル + 初期位置)
 const LANDMARK_DEFS: Record<"character" | "leader", Array<{ key: LandmarkKey; label: string; default: Pt }>> = {
   character: [
     { key: "cost", label: "コスト", default: { x: 0.10, y: 0.08 } },
@@ -65,26 +67,8 @@ const LANDMARK_DEFS: Record<"character" | "leader", Array<{ key: LandmarkKey; la
   ],
 };
 
-const INITIAL: QuadGuides = {
-  outer: {
-    tl: { x: 0.03, y: 0.03 },
-    tr: { x: 0.97, y: 0.03 },
-    bl: { x: 0.03, y: 0.97 },
-    br: { x: 0.97, y: 0.97 },
-  },
-  inner: {
-    tl: { x: 0.07, y: 0.07 },
-    tr: { x: 0.93, y: 0.07 },
-    bl: { x: 0.07, y: 0.93 },
-    br: { x: 0.93, y: 0.93 },
-  },
-};
-
-const CORNER_KEYS: (keyof Quad)[] = ["tl", "tr", "bl", "br"];
-
-const midpoint = (a: Pt, b: Pt): Pt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-const distPx = (a: Pt, b: Pt, w: number, h: number): number =>
-  Math.hypot((a.x - b.x) * w, (a.y - b.y) * h);
+const DEFAULT_OUTER: Lines = { left: 0.02, right: 0.98, top: 0.02, bottom: 0.98 };
+const INNER_MARGIN = 0.04; // 外枠から内側のデフォルト距離
 
 export default function CenteringEditor({
   imageSrc,
@@ -92,6 +76,7 @@ export default function CenteringEditor({
   onSkip,
   fullartMode = false,
   cardKind = "character",
+  initialOuter = null,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -102,15 +87,33 @@ export default function CenteringEditor({
   const [displaySize, setDisplaySize] = useState({ w: 0, h: 0 });
   const [zoom, setZoom] = useState(1);
 
-  const [guides, setGuides] = useState<QuadGuides>(INITIAL);
+  // 初期 guides は外枠 (initialOuter or DEFAULT) + 内枠 (外枠から INNER_MARGIN 内側)
+  const initialGuides = useMemo<GuideLines>(() => {
+    const outer = initialOuter ?? DEFAULT_OUTER;
+    return {
+      outer,
+      inner: {
+        left: Math.min(outer.left + INNER_MARGIN, outer.right - 0.02),
+        right: Math.max(outer.right - INNER_MARGIN, outer.left + 0.02),
+        top: Math.min(outer.top + INNER_MARGIN, outer.bottom - 0.02),
+        bottom: Math.max(outer.bottom - INNER_MARGIN, outer.top + 0.02),
+      },
+    };
+  }, [initialOuter]);
+
+  const [guides, setGuides] = useState<GuideLines>(initialGuides);
+  // initialOuter が変わったら反映
+  useEffect(() => {
+    setGuides(initialGuides);
+  }, [initialGuides]);
+
   const [dragging, setDragging] = useState<
-    | { kind: "quad"; layer: "outer" | "inner"; corner: keyof Quad }
+    | { kind: "line"; layer: LineLayer; key: LineKey }
     | { kind: "landmark"; key: LandmarkKey }
     | null
   >(null);
   const [activeLayer, setActiveLayer] = useState<"outer" | "inner" | "landmark">("outer");
 
-  // ランドマーク (フルアート系のみ): デフォルトはテンプレ位置、ユーザー操作で更新
   const landmarkDefs = LANDMARK_DEFS[cardKind] || LANDMARK_DEFS.character;
   const initialLandmarks: Partial<Record<LandmarkKey, Pt>> = {};
   for (const d of landmarkDefs) initialLandmarks[d.key] = d.default;
@@ -149,11 +152,12 @@ export default function CenteringEditor({
     []
   );
 
-  const handleQuadPointerDown = useCallback(
-    (layer: "outer" | "inner", corner: keyof Quad, e: React.PointerEvent) => {
+  const handleLinePointerDown = useCallback(
+    (layer: LineLayer, key: LineKey, e: React.PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      setDragging({ kind: "quad", layer, corner });
+      setDragging({ kind: "line", layer, key });
+      setActiveLayer(layer);
       containerRef.current?.setPointerCapture(e.pointerId);
     },
     []
@@ -176,11 +180,26 @@ export default function CenteringEditor({
       const p = clientToRatio(e.clientX, e.clientY);
       const x = Math.max(0, Math.min(1, p.x));
       const y = Math.max(0, Math.min(1, p.y));
-      if (dragging.kind === "quad") {
-        setGuides((prev) => ({
-          ...prev,
-          [dragging.layer]: { ...prev[dragging.layer], [dragging.corner]: { x, y } },
-        }));
+      if (dragging.kind === "line") {
+        const { layer, key } = dragging;
+        setGuides((prev) => {
+          const lines = { ...prev[layer] };
+          if (key === "left" || key === "right") {
+            lines[key] = x;
+            // 左右の入れ替わり防止
+            if (lines.left > lines.right - 0.01) {
+              if (key === "left") lines.left = lines.right - 0.01;
+              else lines.right = lines.left + 0.01;
+            }
+          } else {
+            lines[key] = y;
+            if (lines.top > lines.bottom - 0.01) {
+              if (key === "top") lines.top = lines.bottom - 0.01;
+              else lines.bottom = lines.top + 0.01;
+            }
+          }
+          return { ...prev, [layer]: lines };
+        });
       } else {
         setLandmarks((prev) => ({ ...prev, [dragging.key]: { x, y } }));
       }
@@ -195,22 +214,12 @@ export default function CenteringEditor({
 
   const calculateCentering = useCallback((): CenteringResult => {
     const { outer, inner } = guides;
-    // 各辺の中点 (左右辺は tl-bl と tr-br、上下辺は tl-tr と bl-br)
-    const oL = midpoint(outer.tl, outer.bl);
-    const oR = midpoint(outer.tr, outer.br);
-    const oT = midpoint(outer.tl, outer.tr);
-    const oB = midpoint(outer.bl, outer.br);
-    const iL = midpoint(inner.tl, inner.bl);
-    const iR = midpoint(inner.tr, inner.br);
-    const iT = midpoint(inner.tl, inner.tr);
-    const iB = midpoint(inner.bl, inner.br);
-
     const w = imageSize.w || 1;
     const h = imageSize.h || 1;
-    const lrPx = Math.round(distPx(oL, iL, w, h));
-    const rrPx = Math.round(distPx(oR, iR, w, h));
-    const trPx = Math.round(distPx(oT, iT, w, h));
-    const brPx = Math.round(distPx(oB, iB, w, h));
+    const lrPx = Math.round((inner.left - outer.left) * w);
+    const rrPx = Math.round((outer.right - inner.right) * w);
+    const trPx = Math.round((inner.top - outer.top) * h);
+    const brPx = Math.round((outer.bottom - inner.bottom) * h);
 
     const lrTotal = lrPx + rrPx || 1;
     const tbTotal = trPx + brPx || 1;
@@ -224,11 +233,11 @@ export default function CenteringEditor({
       pass: lrLarger <= std.lr_threshold && tbLarger <= std.tb_threshold,
     }));
 
-    const cornersToPx = (q: Quad) => ({
-      tl: [Math.round(q.tl.x * w), Math.round(q.tl.y * h)] as [number, number],
-      tr: [Math.round(q.tr.x * w), Math.round(q.tr.y * h)] as [number, number],
-      bl: [Math.round(q.bl.x * w), Math.round(q.bl.y * h)] as [number, number],
-      br: [Math.round(q.br.x * w), Math.round(q.br.y * h)] as [number, number],
+    const cornersToPx = (l: Lines) => ({
+      tl: [Math.round(l.left * w), Math.round(l.top * h)] as [number, number],
+      tr: [Math.round(l.right * w), Math.round(l.top * h)] as [number, number],
+      bl: [Math.round(l.left * w), Math.round(l.bottom * h)] as [number, number],
+      br: [Math.round(l.right * w), Math.round(l.bottom * h)] as [number, number],
     });
 
     const landmarksPx: Partial<Record<LandmarkKey, [number, number]>> = {};
@@ -262,66 +271,97 @@ export default function CenteringEditor({
     setZoom((prev) => Math.max(1, Math.min(8, prev + delta)));
   }, []);
 
-  const renderQuad = (
-    layer: "outer" | "inner",
-    quad: Quad,
-    color: string,
-    isActive: boolean
-  ) => {
-    const points = [quad.tl, quad.tr, quad.br, quad.bl]
-      .map((p) => `${p.x * 100},${p.y * 100}`)
-      .join(" ");
+  // 線レンダリング (svg)
+  const renderLines = (layer: LineLayer, lines: Lines, color: string, isActive: boolean) => {
+    const opacity = isActive ? 1 : 0.55;
     return (
-      <g key={layer} opacity={isActive ? 1 : 0.7}>
-        <polygon
-          points={points}
-          fill="none"
+      <g key={layer} opacity={opacity}>
+        {/* 上 */}
+        <line
+          x1={0} y1={lines.top * 100}
+          x2={100} y2={lines.top * 100}
           stroke={color}
-          strokeWidth={isActive ? 4 : 3}
+          strokeWidth={isActive ? 0.6 : 0.4}
           vectorEffect="non-scaling-stroke"
-          style={{ pointerEvents: "none" }}
+        />
+        {/* 下 */}
+        <line
+          x1={0} y1={lines.bottom * 100}
+          x2={100} y2={lines.bottom * 100}
+          stroke={color}
+          strokeWidth={isActive ? 0.6 : 0.4}
+          vectorEffect="non-scaling-stroke"
+        />
+        {/* 左 */}
+        <line
+          x1={lines.left * 100} y1={0}
+          x2={lines.left * 100} y2={100}
+          stroke={color}
+          strokeWidth={isActive ? 0.6 : 0.4}
+          vectorEffect="non-scaling-stroke"
+        />
+        {/* 右 */}
+        <line
+          x1={lines.right * 100} y1={0}
+          x2={lines.right * 100} y2={100}
+          stroke={color}
+          strokeWidth={isActive ? 0.6 : 0.4}
+          vectorEffect="non-scaling-stroke"
         />
       </g>
     );
   };
 
-  const renderCornerHandle = (
-    layer: "outer" | "inner",
-    corner: keyof Quad,
-    p: Pt,
+  // 線ハンドル (透明な太いタップ領域 + 中央丸ハンドル)
+  const renderLineHandle = (
+    layer: LineLayer,
+    key: LineKey,
+    pos: number,
     color: string,
     isActive: boolean
   ) => {
-    const visibleSize = isActive ? 10 : 7;   // 視認用の小さい丸
-    const hitSize = isActive ? 28 : 22;      // 透明な広いタップ領域
+    const isHorizontal = key === "top" || key === "bottom";
+    const handleHit = 24; // タップ領域の太さ (px)
+    const knobSize = isActive ? 16 : 12;
     return (
       <div
-        key={`${layer}-${corner}`}
-        onPointerDown={(e) => handleQuadPointerDown(layer, corner, e)}
+        key={`${layer}-${key}`}
+        onPointerDown={(e) => handleLinePointerDown(layer, key, e)}
         style={{
           position: "absolute",
-          left: `${p.x * 100}%`,
-          top: `${p.y * 100}%`,
-          transform: "translate(-50%, -50%)",
-          width: `${hitSize}px`,
-          height: `${hitSize}px`,
+          ...(isHorizontal
+            ? {
+                left: 0,
+                right: 0,
+                top: `${pos * 100}%`,
+                height: `${handleHit}px`,
+                transform: "translateY(-50%)",
+                cursor: "ns-resize",
+              }
+            : {
+                top: 0,
+                bottom: 0,
+                left: `${pos * 100}%`,
+                width: `${handleHit}px`,
+                transform: "translateX(-50%)",
+                cursor: "ew-resize",
+              }),
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          cursor: "grab",
           zIndex: isActive ? 30 : 20,
           touchAction: "none",
         }}
       >
         <div
           style={{
-            width: `${visibleSize}px`,
-            height: `${visibleSize}px`,
+            width: `${knobSize}px`,
+            height: `${knobSize}px`,
             borderRadius: "50%",
             backgroundColor: color,
-            border: "1.5px solid white",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.4)",
-            opacity: isActive ? 1 : 0.6,
+            border: "2px solid white",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.5)",
+            opacity: isActive ? 1 : 0.7,
             pointerEvents: "none",
           }}
         />
@@ -336,7 +376,7 @@ export default function CenteringEditor({
     isActive: boolean,
     isTouched: boolean
   ) => {
-    const color = "#3B82F6"; // blue-500
+    const color = "#3B82F6";
     const visibleSize = isActive ? 14 : 10;
     return (
       <div
@@ -375,7 +415,7 @@ export default function CenteringEditor({
             top: "100%",
             marginTop: "2px",
             fontSize: "9px",
-            color: color,
+            color,
             backgroundColor: "rgba(255,255,255,0.85)",
             padding: "1px 4px",
             borderRadius: "2px",
@@ -395,11 +435,13 @@ export default function CenteringEditor({
       <div className="text-center">
         <h2 className="text-xl font-bold mb-1">センタリング測定</h2>
         <p className="text-sm text-gray-600">
-          4隅の点をドラッグしてカード枠に合わせてください (斜め撮影にも対応)
+          {initialOuter
+            ? "外枠は自動検出済み。内枠 (印刷枠) の4本のラインを微調整してください。"
+            : "外枠 (カード端) と内枠 (印刷枠) の各4本のラインを合わせてください。"}
         </p>
       </div>
 
-      <div className="flex justify-center gap-2">
+      <div className="flex justify-center gap-2 flex-wrap">
         <button
           onClick={() => setActiveLayer("outer")}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -435,7 +477,7 @@ export default function CenteringEditor({
         )}
         <button
           onClick={() => {
-            setGuides(INITIAL);
+            setGuides(initialGuides);
             setLandmarks(initialLandmarks);
             setLandmarksTouched(false);
           }}
@@ -515,24 +557,26 @@ export default function CenteringEditor({
                   zIndex: 5,
                 }}
               >
-                {renderQuad("outer", guides.outer, "#EAB308", activeLayer === "outer")}
-                {renderQuad("inner", guides.inner, "#22C55E", activeLayer === "inner")}
+                {renderLines("outer", guides.outer, "#EAB308", activeLayer === "outer")}
+                {renderLines("inner", guides.inner, "#22C55E", activeLayer === "inner")}
               </svg>
 
-              {/* 4隅のドラッグハンドル */}
-              {(["outer", "inner"] as const).map((layer) =>
-                CORNER_KEYS.map((corner) =>
-                  renderCornerHandle(
-                    layer,
-                    corner,
-                    guides[layer][corner],
-                    layer === "outer" ? "#EAB308" : "#22C55E",
-                    activeLayer === layer
-                  )
-                )
-              )}
+              {/* 線ハンドル (active layer のみ表示してUI整理) */}
+              {(["outer", "inner"] as const).map((layer) => {
+                const isActive = activeLayer === layer;
+                const color = layer === "outer" ? "#EAB308" : "#22C55E";
+                return (
+                  <div key={layer} style={{ display: isActive ? "block" : "none" }}>
+                    {(["top", "bottom"] as const).map((key) =>
+                      renderLineHandle(layer, key, guides[layer][key], color, true)
+                    )}
+                    {(["left", "right"] as const).map((key) =>
+                      renderLineHandle(layer, key, guides[layer][key], color, true)
+                    )}
+                  </div>
+                );
+              })}
 
-              {/* ランドマーク (フルアート系のみ表示) */}
               {fullartMode &&
                 landmarkDefs.map((d) => {
                   const p = landmarks[d.key] ?? d.default;

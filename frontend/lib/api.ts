@@ -52,9 +52,13 @@ export async function getBrands(): Promise<Brand[]> {
   return res.json();
 }
 
-export async function preprocessImage(
-  frontImage: File
-): Promise<{ card_image: string; card_type: string }> {
+export interface PreprocessResult {
+  card_image: string;
+  card_type: string;
+  outer_box?: { left: number; right: number; top: number; bottom: number };
+}
+
+export async function preprocessImage(frontImage: File): Promise<PreprocessResult> {
   const formData = new FormData();
   formData.append("front_image", frontImage);
 

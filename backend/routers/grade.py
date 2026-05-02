@@ -148,7 +148,7 @@ async def preprocess_image(
     if len(image_bytes) == 0:
         raise HTTPException(400, "画像データが空です")
 
-    from ..services.preprocessing import detect_card
+    from ..services.preprocessing import detect_card, find_card_bbox_in_normalized
 
     nparr = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -171,6 +171,9 @@ async def preprocess_image(
         scale = 800 / max(ch, cw)
         card_image = cv2.resize(card_image, (int(cw * scale), int(ch * scale)), interpolation=cv2.INTER_AREA)
 
+    # 正面化後画像のカード端 bbox (CenteringEditor の外枠初期値)
+    outer_box = find_card_bbox_in_normalized(card_image)
+
     # Base64エンコード
     _, buffer = cv2.imencode(".jpg", card_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
     card_b64 = base64.b64encode(buffer).decode("utf-8")
@@ -178,6 +181,7 @@ async def preprocess_image(
     return {
         "card_image": card_b64,
         "card_type": card_data["card_type"],
+        "outer_box": outer_box,
     }
 
 
