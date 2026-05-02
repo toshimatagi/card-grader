@@ -131,27 +131,31 @@ export default function CardPriceSummary({ code }: Props) {
             </tbody>
           </table>
 
-          {/* 信頼度行 (代表バリアントの sell_stats) */}
-          {first.sell_stats && (
-            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-600">
-              <span>信頼度:</span>
-              <span
-                className={`inline-block px-1.5 py-0.5 rounded-full font-medium border ${
-                  CONFIDENCE_META[first.sell_stats.confidence].cls
-                }`}
-              >
-                {CONFIDENCE_META[first.sell_stats.confidence].label}
-              </span>
-              <span>{first.sell_stats.sourceCount}サイト</span>
-              <span>{first.sell_stats.sampleCount}件</span>
-              {first.sell_stats.min !== first.sell_stats.max && (
-                <span>
-                  幅 ¥{first.sell_stats.min.toLocaleString()}〜¥
-                  {first.sell_stats.max.toLocaleString()}
+          {/* 信頼度行 (販売データがある最初のバリアントを採用) */}
+          {(() => {
+            const sellStats = data.cards.find((c) => c.sell_stats)?.sell_stats;
+            if (!sellStats) return null;
+            return (
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-600">
+                <span>信頼度:</span>
+                <span
+                  className={`inline-block px-1.5 py-0.5 rounded-full font-medium border ${
+                    CONFIDENCE_META[sellStats.confidence].cls
+                  }`}
+                >
+                  {CONFIDENCE_META[sellStats.confidence].label}
                 </span>
-              )}
-            </div>
-          )}
+                <span>{sellStats.sourceCount}サイト</span>
+                <span>{sellStats.sampleCount}件</span>
+                {sellStats.min !== sellStats.max && (
+                  <span>
+                    幅 ¥{sellStats.min.toLocaleString()}〜¥
+                    {sellStats.max.toLocaleString()}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
           <p className="text-xs text-gray-500 mt-2">
             ※ 複数の取扱いサイトから集計した中央値

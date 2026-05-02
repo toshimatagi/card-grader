@@ -196,13 +196,17 @@ export default async function CardDetailPage({
             </tbody>
           </table>
 
-          {/* 集計サマリ (代表バリアント) */}
-          {data.cards[0]?.sell_stats && (
-            <PriceStatsSummary stats={data.cards[0].sell_stats} priceType="sell" />
-          )}
-          {data.cards[0]?.buy_stats && (
-            <PriceStatsSummary stats={data.cards[0].buy_stats} priceType="buy" />
-          )}
+          {/* 集計サマリ (販売・買取それぞれデータがある最初のバリアント) */}
+          {(() => {
+            const sell = data.cards.find((c) => c.sell_stats)?.sell_stats;
+            const buy = data.cards.find((c) => c.buy_stats)?.buy_stats;
+            return (
+              <>
+                {sell && <PriceStatsSummary stats={sell} priceType="sell" />}
+                {buy && <PriceStatsSummary stats={buy} priceType="buy" />}
+              </>
+            );
+          })()}
 
           <p className="text-xs text-gray-500 mt-2">
             ※ 複数の取扱いサイトから集計した中央値を表示しています
