@@ -22,8 +22,31 @@ def _headers(prefer: str = "return=representation") -> dict:
     }
 
 
+# プレースホルダ/無効な画像URLパターン
+_INVALID_IMAGE_PATTERNS = (
+    "spacer.gif",
+    "noimage",
+    "no_image",
+    "no-image",
+    "/blank.gif",
+)
+
+
+def _is_valid_image_url(url: Optional[str]) -> bool:
+    if not url:
+        return False
+    s = url.strip().lower()
+    if not s:
+        return False
+    return not any(p in s for p in _INVALID_IMAGE_PATTERNS)
+
+
 async def upsert_card(client: httpx.AsyncClient, card: CrawledCard) -> Optional[str]:
-    """cards をUPSERT して card_id を返す。失敗時は None。"""
+    """cards をUPSERT して card_id を返す。失敗時は None。
+
+    image_url は無効値 (None/空/spacer.gif 等のプレースホルダ) で
+    既存の有効値を上書きしない。新値が有効な場合のみ更新する。
+    """
     payload = {
         "brand": card.brand,
         "set_code": card.set_code,
@@ -31,8 +54,13 @@ async def upsert_card(client: httpx.AsyncClient, card: CrawledCard) -> Optional[
         "variant": card.variant,
         "rarity": card.rarity,
         "name_ja": card.name_ja,
-        "image_url": card.image_url,
     }
+    # 新 image_url が有効な場合のみ payload に含める。
+    # 含まれない場合 PostgREST の merge-duplicates は他カラムだけ更新し
+    # 既存 image_url を保持する。
+    if _is_valid_image_url(card.image_url):
+        payload["image_url"] = card.image_url
+
     # on_conflict で unique(brand,set_code,card_no,variant,rarity) にマッチしたらUPDATE
     url = (
         f"{SUPABASE_URL}/rest/v1/cards"

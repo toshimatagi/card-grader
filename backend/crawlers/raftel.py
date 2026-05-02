@@ -138,6 +138,15 @@ class RaftelScraper(BaseScraper):
 
             img = a.find("img")
             image_url = img.get("src") if img else None
+            # raftel の listing ページは lazy-load 用 spacer.gif を src に置き
+            # 実画像は data-src/data-original 等の属性に入る。プレースホルダは捨てる。
+            if image_url and ("spacer.gif" in image_url.lower()):
+                image_url = (
+                    img.get("data-src")
+                    or img.get("data-original")
+                    or img.get("data-lazy-src")
+                    if img else None
+                )
             if image_url and image_url.startswith("/"):
                 image_url = f"{BASE}{image_url}"
 
