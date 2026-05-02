@@ -23,16 +23,44 @@ export async function generateMetadata({
 
   const first = data.cards[0];
   const codeUpper = data.code;
-  const variants = data.cards
-    .map((c) => {
-      const sell = c.sell_price != null ? `¥${c.sell_price.toLocaleString()}` : "-";
-      const buy = c.buy_price != null ? `¥${c.buy_price.toLocaleString()}` : "-";
-      return `${VARIANT_LABEL[c.variant] ?? c.variant}: 販売${sell}/買取${buy}`;
-    })
-    .join(" / ");
+  const sellPrices = data.cards
+    .map((c) => c.sell_price)
+    .filter((p): p is number => p != null && p > 0);
+  const buyPrices = data.cards
+    .map((c) => c.buy_price)
+    .filter((p): p is number => p != null && p > 0);
+  const minSell = sellPrices.length ? Math.min(...sellPrices) : null;
+  const maxSell = sellPrices.length ? Math.max(...sellPrices) : null;
+  const maxBuy = buyPrices.length ? Math.max(...buyPrices) : null;
+  const variantCount = data.cards.length;
 
-  const title = `${first.name_ja} (${codeUpper}) 価格相場`;
-  const description = `ワンピースカード「${first.name_ja}」(${codeUpper}) の最新相場。${variants}。複数の取扱いサイトから集計した中央値を表示。`;
+  // 検索意図に合わせたキーワードリッチ title
+  const sellRange =
+    minSell != null && maxSell != null && minSell !== maxSell
+      ? ` ¥${minSell.toLocaleString()}〜¥${maxSell.toLocaleString()}`
+      : minSell != null
+        ? ` ¥${minSell.toLocaleString()}`
+        : "";
+  const title = `${first.name_ja} ${codeUpper} 相場・買取価格${sellRange} | ワンピカード`;
+
+  // 動的 description: 販売中央値・買取最高値・バリアント数を含む
+  const descParts: string[] = [];
+  descParts.push(
+    `ワンピースカード「${first.name_ja}」(${codeUpper}) の最新相場と買取価格`
+  );
+  if (variantCount > 1) {
+    descParts.push(`${variantCount}バリアントを比較表示`);
+  }
+  if (minSell != null && maxSell != null && minSell !== maxSell) {
+    descParts.push(`販売中央値 ¥${minSell.toLocaleString()}〜¥${maxSell.toLocaleString()}`);
+  } else if (minSell != null) {
+    descParts.push(`販売中央値 ¥${minSell.toLocaleString()}`);
+  }
+  if (maxBuy != null) {
+    descParts.push(`買取最高値 ¥${maxBuy.toLocaleString()}`);
+  }
+  descParts.push("フリマ購入前・PSA提出前のチェックに");
+  const description = descParts.join("。") + "。";
 
   const url = `${SITE_URL}/cards/${codeUpper}`;
   return {
@@ -92,7 +120,7 @@ export default async function CardDetailPage({
   const buySeries = buildSeries(data.cards, "buy");
 
   // JSON-LD 構造化データ (Product schema)
-  const jsonLd = {
+  const productJsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
     name: `${data.cards[0].name_ja} (${data.code})`,
@@ -111,11 +139,41 @@ export default async function CardDetailPage({
       })),
   };
 
+  // BreadcrumbList JSON-LD
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "ホーム",
+        item: SITE_URL,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "ワンピカード価格DB",
+        item: `${SITE_URL}/cards`,
+      },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: `${data.cards[0].name_ja} (${data.code})`,
+        item: `${SITE_URL}/cards/${data.code}`,
+      },
+    ],
+  };
+
   return (
     <div>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
       <nav className="text-sm text-gray-500 mb-2">
         <a href="/cards" className="hover:underline">価格DB</a>
@@ -289,11 +347,167 @@ export default async function CardDetailPage({
         <PriceChart series={sellSeries} />
       </section>
 
-      <section>
+      <section className="mb-8">
         <h2 className="font-bold mb-2">買取価格の推移</h2>
         <PriceChart series={buySeries} />
       </section>
+
+      {/* SEO本文セクション (G-3 動的生成テンプレ) */}
+      <CardDetailNotes cards={data.cards} cardCode={data.code} />
     </div>
+  );
+}
+
+function CardDetailNotes({ cards, cardCode }: { cards: CardVariant[]; cardCode: string }) {
+  const sellPrices = cards
+    .map((c) => c.sell_price)
+    .filter((p): p is number => p != null && p > 0);
+  const buyPrices = cards
+    .map((c) => c.buy_price)
+    .filter((p): p is number => p != null && p > 0);
+  const minSell = sellPrices.length ? Math.min(...sellPrices) : null;
+  const maxSell = sellPrices.length ? Math.max(...sellPrices) : null;
+  const maxBuy = buyPrices.length ? Math.max(...buyPrices) : null;
+  const ratio =
+    minSell != null && maxSell != null && minSell > 0 ? maxSell / minSell : null;
+  const variantCount = cards.length;
+  const name = cards[0]?.name_ja ?? "";
+
+  // 代表バリアント (販売データありの最初)
+  const repStats = cards.find((c) => c.sell_stats)?.sell_stats;
+  const buyStats = cards.find((c) => c.buy_stats)?.buy_stats;
+  const buyRatePct =
+    repStats && buyStats && repStats.median > 0
+      ? Math.round((buyStats.median / repStats.median) * 100)
+      : null;
+
+  // 価格推移 (代表バリアントの直近2点で簡易判定)
+  const repCard = cards.find((c) => c.history.some((h) => h.price_type === "sell"));
+  const sellHist = repCard?.history.filter((h) => h.price_type === "sell") ?? [];
+  let trendComment: string | null = null;
+  if (sellHist.length >= 2) {
+    const first = sellHist[0].price as number;
+    const last = sellHist[sellHist.length - 1].price as number;
+    if (first > 0) {
+      const pct = ((last - first) / first) * 100;
+      if (Math.abs(pct) >= 10) {
+        trendComment = pct > 0
+          ? `直近の販売中央値は約 ${pct.toFixed(1)}% 上昇傾向にあります。`
+          : `直近の販売中央値は約 ${Math.abs(pct).toFixed(1)}% 下落傾向にあります。`;
+      } else {
+        trendComment = "直近の販売中央値は概ね横ばいで推移しています。";
+      }
+    }
+  }
+
+  return (
+    <section className="space-y-4 mb-8">
+      <h2 className="text-lg font-bold border-b pb-1">
+        {name} ({cardCode}) の相場コメント
+      </h2>
+
+      {/* 相場コメント */}
+      <div className="p-4 rounded-lg border bg-white">
+        <h3 className="font-semibold text-sm mb-2">📊 相場の概要</h3>
+        <p className="text-sm leading-relaxed text-gray-700">
+          ワンピースカード「{name}」({cardCode}) は
+          {variantCount > 1
+            ? `${variantCount}バリアントが流通しており、`
+            : "現在、"}
+          {minSell != null && maxSell != null && minSell !== maxSell ? (
+            <>
+              販売中央値は <strong>¥{minSell.toLocaleString()}</strong> 〜 <strong>¥{maxSell.toLocaleString()}</strong>{" "}
+              の幅があります。
+              {ratio != null && ratio >= 3 && (
+                <>
+                  {" "}通常版と高額バリアントで <strong>約{ratio.toFixed(1)}倍</strong> の価格差があるため、
+                  購入時はレアリティ・イラスト・縁取りを必ず確認してください。
+                </>
+              )}
+            </>
+          ) : minSell != null ? (
+            <>
+              販売中央値は <strong>¥{minSell.toLocaleString()}</strong> 前後で推移しています。
+            </>
+          ) : (
+            "現在、販売価格の集計データが不足しています。"
+          )}
+          {maxBuy != null && (
+            <>
+              {" "}買取最高値は <strong>¥{maxBuy.toLocaleString()}</strong>
+              {buyRatePct != null && (
+                <>
+                  {" "}(販売価格の約 {buyRatePct}%)
+                </>
+              )}
+              。
+            </>
+          )}
+        </p>
+      </div>
+
+      {/* 価格推移コメント */}
+      {trendComment && (
+        <div className="p-4 rounded-lg border bg-white">
+          <h3 className="font-semibold text-sm mb-2">📈 価格推移</h3>
+          <p className="text-sm leading-relaxed text-gray-700">{trendComment}</p>
+        </div>
+      )}
+
+      {/* 仕入れ時の注意点 */}
+      <div className="p-4 rounded-lg border bg-white">
+        <h3 className="font-semibold text-sm mb-2">💡 仕入れ・購入時の注意点</h3>
+        <ul className="list-disc list-inside space-y-1 text-sm leading-relaxed text-gray-700">
+          {ratio != null && ratio >= 3 && (
+            <li>
+              <strong>高額バリアント</strong>と通常版で大きな価格差があります。型番だけでなくイラスト・レアリティ表記・箔押し有無を確認しましょう。
+            </li>
+          )}
+          {buyRatePct != null && buyRatePct < 50 && (
+            <li>
+              買取率が販売価格の約 <strong>{buyRatePct}%</strong> と低めです。短期転売の利幅は薄いので慎重に判断してください。
+            </li>
+          )}
+          {buyRatePct != null && buyRatePct >= 60 && (
+            <li>
+              買取率は販売価格の約 <strong>{buyRatePct}%</strong> と比較的高く、需要のあるカードと考えられます。
+            </li>
+          )}
+          {repStats && repStats.confidence !== "high" && (
+            <li>
+              現在の販売価格は{repStats.confidence === "low" ? "取得元が少なく" : "やや取得サイトが限られており"}
+              、<strong>表示価格を過信せず</strong>複数サイトでの確認を推奨します。
+            </li>
+          )}
+          <li>フリマで購入する場合は、表面・裏面・四隅・型番周辺の<strong>追加写真</strong>を依頼すると安心です。</li>
+        </ul>
+      </div>
+
+      {/* PSA提出時の注意点 */}
+      <div className="p-4 rounded-lg border bg-white">
+        <h3 className="font-semibold text-sm mb-2">🏆 PSA/BGS 提出時の注意点</h3>
+        <ul className="list-disc list-inside space-y-1 text-sm leading-relaxed text-gray-700">
+          <li>裏面の<strong>白かけ・角欠け・エッジ傷</strong>は鑑定スコアに大きく影響します。提出前に表裏チェックを必ず行ってください。</li>
+          <li>センタリングは表裏のうち<strong>悪い方</strong>が採用されるため、両面を確認することが重要です。</li>
+          {ratio != null && ratio >= 3 && (
+            <li>
+              高額バリアントは PSA10 取得時のリターンが大きい一方、状態への要求も厳しくなります。状態が完璧でない場合は無鑑定で売却する選択も検討してください。
+            </li>
+          )}
+          <li>
+            鑑定費用・送料を踏まえた損益分岐点を確認してから提出を判断しましょう。
+            <a href="/" className="text-blue-600 hover:underline ml-1">
+              表裏チェックツール
+            </a>
+            でセンタリング目安を測定できます。
+          </li>
+        </ul>
+      </div>
+
+      <p className="text-[11px] text-gray-500">
+        ※ 上記コメントは集計データから自動生成しており、最終判断はご自身でお願いします。AIによる正式鑑定ではありません。
+      </p>
+    </section>
   );
 }
 
