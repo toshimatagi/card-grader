@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { CardByCodeResult } from "../../lib/api";
+import type { CardByCodeResult, PriceConfidence } from "../../lib/api";
 
 interface Props {
   code: string;
@@ -15,6 +15,12 @@ const VARIANT_LABEL: Record<string, string> = {
   alt_art: "アルトアート",
   manga: "マンガ",
   other: "その他",
+};
+
+const CONFIDENCE_META: Record<PriceConfidence, { label: string; cls: string }> = {
+  high: { label: "高", cls: "bg-green-100 text-green-700 border-green-200" },
+  medium: { label: "中", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" },
+  low: { label: "低", cls: "bg-gray-100 text-gray-600 border-gray-200" },
 };
 
 export default function CardPriceSummary({ code }: Props) {
@@ -90,30 +96,63 @@ export default function CardPriceSummary({ code }: Props) {
             <thead>
               <tr className="text-left text-xs text-gray-500">
                 <th className="py-1 pr-2">バリアント</th>
-                <th className="py-1 px-2 text-right">販売価格</th>
-                <th className="py-1 pl-2 text-right">買取価格</th>
+                <th className="py-1 px-2 text-right">販売</th>
+                <th className="py-1 px-2 text-right">買取</th>
+                <th className="py-1 pl-2 text-right">買取率</th>
               </tr>
             </thead>
             <tbody>
-              {data.cards.map((c) => (
-                <tr key={c.id} className="border-t">
-                  <td className="py-1 pr-2 text-xs">
-                    {VARIANT_LABEL[c.variant] ?? c.variant} / {c.rarity}
-                  </td>
-                  <td className="py-1 px-2 text-right tabular-nums">
-                    {c.sell_price != null
-                      ? `¥${c.sell_price.toLocaleString()}`
-                      : "-"}
-                  </td>
-                  <td className="py-1 pl-2 text-right tabular-nums">
-                    {c.buy_price != null
-                      ? `¥${c.buy_price.toLocaleString()}`
-                      : "-"}
-                  </td>
-                </tr>
-              ))}
+              {data.cards.map((c) => {
+                const buyRate =
+                  c.sell_stats && c.buy_stats && c.sell_stats.median > 0
+                    ? Math.round((c.buy_stats.median / c.sell_stats.median) * 100)
+                    : null;
+                return (
+                  <tr key={c.id} className="border-t">
+                    <td className="py-1 pr-2 text-xs">
+                      {VARIANT_LABEL[c.variant] ?? c.variant} / {c.rarity}
+                    </td>
+                    <td className="py-1 px-2 text-right tabular-nums">
+                      {c.sell_price != null
+                        ? `¥${c.sell_price.toLocaleString()}`
+                        : "-"}
+                    </td>
+                    <td className="py-1 px-2 text-right tabular-nums">
+                      {c.buy_price != null
+                        ? `¥${c.buy_price.toLocaleString()}`
+                        : "-"}
+                    </td>
+                    <td className="py-1 pl-2 text-right tabular-nums text-xs">
+                      {buyRate != null ? `${buyRate}%` : "-"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+
+          {/* 信頼度行 (代表バリアントの sell_stats) */}
+          {first.sell_stats && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-gray-600">
+              <span>信頼度:</span>
+              <span
+                className={`inline-block px-1.5 py-0.5 rounded-full font-medium border ${
+                  CONFIDENCE_META[first.sell_stats.confidence].cls
+                }`}
+              >
+                {CONFIDENCE_META[first.sell_stats.confidence].label}
+              </span>
+              <span>{first.sell_stats.sourceCount}サイト</span>
+              <span>{first.sell_stats.sampleCount}件</span>
+              {first.sell_stats.min !== first.sell_stats.max && (
+                <span>
+                  幅 ¥{first.sell_stats.min.toLocaleString()}〜¥
+                  {first.sell_stats.max.toLocaleString()}
+                </span>
+              )}
+            </div>
+          )}
+
           <p className="text-xs text-gray-500 mt-2">
             ※ 複数の取扱いサイトから集計した中央値
           </p>

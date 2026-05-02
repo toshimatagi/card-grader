@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { getCardByCode, type CardVariant } from "../../../lib/api";
+import { getCardByCode, type CardVariant, type PriceStats, type PriceConfidence } from "../../../lib/api";
 import PriceChart from "../../../components/cards/PriceChart";
 
 export const dynamic = "force-dynamic";
@@ -149,35 +149,61 @@ export default async function CardDetailPage({
               <tr className="bg-gray-100 text-left">
                 <th className="p-2 border-b">バリアント</th>
                 <th className="p-2 border-b">レアリティ</th>
-                <th className="p-2 border-b text-right">販売価格</th>
-                <th className="p-2 border-b text-right">買取価格</th>
+                <th className="p-2 border-b text-right">販売 (中央値)</th>
+                <th className="p-2 border-b text-right">販売レンジ</th>
+                <th className="p-2 border-b text-right">買取 (中央値)</th>
+                <th className="p-2 border-b text-right">買取率</th>
+                <th className="p-2 border-b">信頼度</th>
               </tr>
             </thead>
             <tbody>
-              {data.cards.map((c) => (
-                <tr key={c.id} className="border-b">
-                  <td className="p-2">
-                    <span
-                      className="inline-block w-3 h-3 rounded-full mr-2 align-middle"
-                      style={{ background: VARIANT_COLOR[c.variant] ?? "#999" }}
-                    />
-                    {VARIANT_LABEL[c.variant] ?? c.variant}
-                  </td>
-                  <td className="p-2">{c.rarity}</td>
-                  <td className="p-2 text-right">
-                    {c.sell_price != null
-                      ? `¥${c.sell_price.toLocaleString()}`
-                      : "-"}
-                  </td>
-                  <td className="p-2 text-right">
-                    {c.buy_price != null
-                      ? `¥${c.buy_price.toLocaleString()}`
-                      : "-"}
-                  </td>
-                </tr>
-              ))}
+              {data.cards.map((c) => {
+                const buyRate =
+                  c.sell_stats && c.buy_stats && c.sell_stats.median > 0
+                    ? Math.round((c.buy_stats.median / c.sell_stats.median) * 100)
+                    : null;
+                const conf = c.sell_stats?.confidence ?? c.buy_stats?.confidence ?? null;
+                return (
+                  <tr key={c.id} className="border-b align-top">
+                    <td className="p-2">
+                      <span
+                        className="inline-block w-3 h-3 rounded-full mr-2 align-middle"
+                        style={{ background: VARIANT_COLOR[c.variant] ?? "#999" }}
+                      />
+                      {VARIANT_LABEL[c.variant] ?? c.variant}
+                    </td>
+                    <td className="p-2">{c.rarity}</td>
+                    <td className="p-2 text-right tabular-nums">
+                      {c.sell_price != null ? `¥${c.sell_price.toLocaleString()}` : "-"}
+                    </td>
+                    <td className="p-2 text-right text-xs text-gray-600 tabular-nums">
+                      {c.sell_stats && c.sell_stats.min !== c.sell_stats.max
+                        ? `¥${c.sell_stats.min.toLocaleString()}〜¥${c.sell_stats.max.toLocaleString()}`
+                        : "-"}
+                    </td>
+                    <td className="p-2 text-right tabular-nums">
+                      {c.buy_price != null ? `¥${c.buy_price.toLocaleString()}` : "-"}
+                    </td>
+                    <td className="p-2 text-right tabular-nums">
+                      {buyRate != null ? `${buyRate}%` : "-"}
+                    </td>
+                    <td className="p-2">
+                      {conf ? <ConfidenceBadge confidence={conf} /> : "-"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+
+          {/* 集計サマリ (代表バリアント) */}
+          {data.cards[0]?.sell_stats && (
+            <PriceStatsSummary stats={data.cards[0].sell_stats} priceType="sell" />
+          )}
+          {data.cards[0]?.buy_stats && (
+            <PriceStatsSummary stats={data.cards[0].buy_stats} priceType="buy" />
+          )}
+
           <p className="text-xs text-gray-500 mt-2">
             ※ 複数の取扱いサイトから集計した中央値を表示しています
           </p>
@@ -208,4 +234,57 @@ function buildSeries(cards: CardVariant[], priceType: "sell" | "buy") {
         .map((h) => ({ t: h.captured_at, v: h.price as number })),
     }))
     .filter((s) => s.points.length > 0);
+}
+
+function ConfidenceBadge({ confidence }: { confidence: PriceConfidence }) {
+  const meta: Record<PriceConfidence, { label: string; cls: string }> = {
+    high: { label: "高", cls: "bg-green-100 text-green-700 border-green-200" },
+    medium: { label: "中", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" },
+    low: { label: "低", cls: "bg-gray-100 text-gray-600 border-gray-200" },
+  };
+  const m = meta[confidence];
+  return (
+    <span
+      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium border ${m.cls}`}
+    >
+      {m.label}
+    </span>
+  );
+}
+
+function relativeTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  const diffMin = Math.floor((Date.now() - t) / 60000);
+  if (diffMin < 1) return "たった今";
+  if (diffMin < 60) return `${diffMin}分前`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}時間前`;
+  const diffD = Math.floor(diffH / 24);
+  return `${diffD}日前`;
+}
+
+function PriceStatsSummary({ stats, priceType }: { stats: PriceStats; priceType: "sell" | "buy" }) {
+  const label = priceType === "sell" ? "販売" : "買取";
+  const reason: string[] = [];
+  if (stats.sourceCount < 2) reason.push("取得元1サイトのみ");
+  if (stats.sampleCount < 5) reason.push(`データ${stats.sampleCount}件`);
+  const spread = stats.median > 0 ? (stats.max - stats.min) / stats.median : 0;
+  if (spread > 0.5) reason.push("価格ブレ大");
+  return (
+    <div className="mt-3 text-xs text-gray-600 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span className="font-medium">{label}価格 信頼度:</span>
+      <ConfidenceBadge confidence={stats.confidence} />
+      <span>取得元 {stats.sourceCount}サイト</span>
+      <span>{stats.sampleCount}件</span>
+      <span>最終更新 {relativeTime(stats.lastAt)}</span>
+      {stats.min !== stats.max && (
+        <span>
+          幅 ¥{stats.min.toLocaleString()}〜¥{stats.max.toLocaleString()}
+        </span>
+      )}
+      {reason.length > 0 && stats.confidence !== "high" && (
+        <span className="text-amber-700">({reason.join(" / ")})</span>
+      )}
+    </div>
+  );
 }

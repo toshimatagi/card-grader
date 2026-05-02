@@ -265,6 +265,18 @@ export interface PriceSnapshot {
   stock_status: string | null;
 }
 
+export type PriceConfidence = "high" | "medium" | "low";
+
+export interface PriceStats {
+  min: number;
+  max: number;
+  median: number;
+  sourceCount: number;
+  sampleCount: number;
+  lastAt: string; // ISO timestamp
+  confidence: PriceConfidence;
+}
+
 export interface CardVariant {
   id: string;
   brand: string;
@@ -276,6 +288,8 @@ export interface CardVariant {
   image_url: string | null;
   sell_price: number | null;
   buy_price: number | null;
+  sell_stats: PriceStats | null;
+  buy_stats: PriceStats | null;
   history: PriceSnapshot[];
 }
 
@@ -482,6 +496,8 @@ export async function getCardByCode(code: string): Promise<CardByCodeResult> {
       image_url: cleanImageUrl(c.image_url),
       sell_price: latestPerSourceAggregate(all, "sell"),
       buy_price: latestPerSourceAggregate(all, "buy"),
+      sell_stats: computePriceStats(all, "sell"),
+      buy_stats: computePriceStats(all, "buy"),
       history: [
         ...dailyAggregateSeries(c.id, all, "sell"),
         ...dailyAggregateSeries(c.id, all, "buy"),
@@ -490,6 +506,49 @@ export async function getCardByCode(code: string): Promise<CardByCodeResult> {
   });
 
   return { code: `${setCode}-${cardNo}`, cards: resultCards };
+}
+
+function computePriceStats(
+  snapshots: PriceSnapshot[],
+  priceType: "sell" | "buy"
+): PriceStats | null {
+  const filtered = snapshots.filter(
+    (s) => s.price_type === priceType && s.price != null
+  );
+  if (filtered.length === 0) return null;
+
+  // latest per source: 表示価格と整合する形で min/max/median を出す
+  const bySource = new Map<string, PriceSnapshot>();
+  for (const s of filtered) {
+    const cur = bySource.get(s.source);
+    if (!cur || s.captured_at > cur.captured_at) bySource.set(s.source, s);
+  }
+  const latestPrices = Array.from(bySource.values(), (s) => s.price as number);
+  if (latestPrices.length === 0) return null;
+
+  const sorted = [...latestPrices].sort((a, b) => a - b);
+  const min = sorted[0];
+  const max = sorted[sorted.length - 1];
+  const median = aggregate(latestPrices) ?? min;
+
+  const sourceCount = bySource.size;
+  const sampleCount = filtered.length;
+  const lastAt = filtered.reduce(
+    (a, b) => (a.captured_at > b.captured_at ? a : b)
+  ).captured_at;
+
+  // 信頼度: ソース3+ かつ snapshot 5+ かつ レンジ幅が中央値の50%以内 → 高
+  const spread = median > 0 ? (max - min) / median : 0;
+  let confidence: PriceConfidence;
+  if (sourceCount >= 3 && sampleCount >= 5 && spread <= 0.5) {
+    confidence = "high";
+  } else if (sourceCount >= 2) {
+    confidence = "medium";
+  } else {
+    confidence = "low";
+  }
+
+  return { min, max, median, sourceCount, sampleCount, lastAt, confidence };
 }
 
 function aggregate(values: number[]): number | null {
