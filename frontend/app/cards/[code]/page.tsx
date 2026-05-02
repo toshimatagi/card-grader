@@ -128,90 +128,160 @@ export default async function CardDetailPage({
         <span className="text-base text-gray-500 ml-3">{data.code}</span>
       </h1>
 
-      <div className="grid md:grid-cols-[200px_1fr] gap-6 mb-8">
-        <div className="flex flex-col gap-2">
-          {data.cards.map((c) => (
-            c.image_url && (
-              <img
-                key={c.id}
-                src={c.image_url}
-                alt={`${c.rarity} ${VARIANT_LABEL[c.variant] ?? c.variant}`}
-                className="w-full rounded border"
-              />
-            )
-          )).filter(Boolean).slice(0, 3)}
+      {/* 高額バリアント警告 (B-3) */}
+      {(() => {
+        const sellPrices = data.cards
+          .map((c) => c.sell_price)
+          .filter((p): p is number => p != null && p > 0);
+        if (sellPrices.length < 2) return null;
+        const minP = Math.min(...sellPrices);
+        const maxP = Math.max(...sellPrices);
+        const ratio = maxP / minP;
+        if (ratio < 3) return null;
+        const topVariant = data.cards.find((c) => c.sell_price === maxP);
+        return (
+          <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
+            ⚠️ <strong>高額バリアントあり</strong>: この型番には{" "}
+            <strong>{ratio.toFixed(1)}倍</strong>の価格差があります (最安 ¥
+            {minP.toLocaleString()} 〜 最高 ¥{maxP.toLocaleString()}
+            {topVariant ? ` / ${VARIANT_LABEL[topVariant.variant] ?? topVariant.variant} ${topVariant.rarity}` : ""}
+            )。フリマ購入時は<strong>イラスト・縁取り・レアリティ表記</strong>を必ず確認してください。
+          </div>
+        );
+      })()}
+
+      <div className="mb-8">
+        <h2 className="font-bold mb-2">バリアント別 価格</h2>
+        {(() => {
+          const sellPrices = data.cards
+            .map((c) => c.sell_price)
+            .filter((p): p is number => p != null && p > 0);
+          const minPrice = sellPrices.length ? Math.min(...sellPrices) : null;
+          const HIGH_VALUE_VARIANTS = new Set(["parallel", "super_parallel", "alt_art"]);
+          return (
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="bg-gray-100 text-left">
+                  <th className="p-2 border-b w-16">画像</th>
+                  <th className="p-2 border-b">バリアント</th>
+                  <th className="p-2 border-b">レアリティ</th>
+                  <th className="p-2 border-b text-right">販売 (中央値)</th>
+                  <th className="p-2 border-b text-right">倍率</th>
+                  <th className="p-2 border-b text-right">販売レンジ</th>
+                  <th className="p-2 border-b text-right">買取 (中央値)</th>
+                  <th className="p-2 border-b text-right">買取率</th>
+                  <th className="p-2 border-b">信頼度</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.cards.map((c) => {
+                  const buyRate =
+                    c.sell_stats && c.buy_stats && c.sell_stats.median > 0
+                      ? Math.round((c.buy_stats.median / c.sell_stats.median) * 100)
+                      : null;
+                  const conf = c.sell_stats?.confidence ?? c.buy_stats?.confidence ?? null;
+                  const multiplier =
+                    c.sell_price != null && minPrice != null && minPrice > 0
+                      ? c.sell_price / minPrice
+                      : null;
+                  const isHighValue =
+                    HIGH_VALUE_VARIANTS.has(c.variant) ||
+                    (multiplier != null && multiplier >= 3);
+                  return (
+                    <tr key={c.id} className="border-b align-top">
+                      <td className="p-2">
+                        {c.image_url ? (
+                          <img
+                            src={c.image_url}
+                            alt={`${c.rarity} ${VARIANT_LABEL[c.variant] ?? c.variant}`}
+                            className="w-12 h-auto rounded border"
+                          />
+                        ) : (
+                          <div className="w-12 aspect-[5/7] bg-gray-100 rounded flex items-center justify-center text-[8px] text-gray-400">
+                            No Img
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className="inline-block w-3 h-3 rounded-full align-middle flex-shrink-0"
+                            style={{ background: VARIANT_COLOR[c.variant] ?? "#999" }}
+                          />
+                          {VARIANT_LABEL[c.variant] ?? c.variant}
+                          {isHighValue && (
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-medium whitespace-nowrap"
+                              title="高額バリアント。通常版と混同しないよう注意"
+                            >
+                              ⚠️ 高額版
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-2">{c.rarity}</td>
+                      <td className="p-2 text-right tabular-nums">
+                        {c.sell_price != null ? `¥${c.sell_price.toLocaleString()}` : "-"}
+                      </td>
+                      <td className="p-2 text-right tabular-nums text-xs">
+                        {multiplier != null && multiplier >= 1.5 ? (
+                          <span className={multiplier >= 3 ? "text-amber-700 font-bold" : "text-gray-700"}>
+                            {multiplier.toFixed(1)}倍
+                          </span>
+                        ) : multiplier != null ? (
+                          <span className="text-gray-400">基準</span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="p-2 text-right text-xs text-gray-600 tabular-nums">
+                        {c.sell_stats && c.sell_stats.min !== c.sell_stats.max
+                          ? `¥${c.sell_stats.min.toLocaleString()}〜¥${c.sell_stats.max.toLocaleString()}`
+                          : "-"}
+                      </td>
+                      <td className="p-2 text-right tabular-nums">
+                        {c.buy_price != null ? `¥${c.buy_price.toLocaleString()}` : "-"}
+                      </td>
+                      <td className="p-2 text-right tabular-nums">
+                        {buyRate != null ? `${buyRate}%` : "-"}
+                      </td>
+                      <td className="p-2">
+                        {conf ? <ConfidenceBadge confidence={conf} /> : "-"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          );
+        })()}
+
+        {/* 集計サマリ (販売・買取それぞれデータがある最初のバリアント) */}
+        {(() => {
+          const sell = data.cards.find((c) => c.sell_stats)?.sell_stats;
+          const buy = data.cards.find((c) => c.buy_stats)?.buy_stats;
+          return (
+            <>
+              {sell && <PriceStatsSummary stats={sell} priceType="sell" />}
+              {buy && <PriceStatsSummary stats={buy} priceType="buy" />}
+            </>
+          );
+        })()}
+
+        {/* 見分けポイント (B-3 汎用テンプレート) */}
+        <div className="mt-4 p-3 rounded-lg bg-blue-50 border border-blue-100 text-xs text-blue-900">
+          <div className="font-semibold mb-1">🔍 バリアントの見分けポイント</div>
+          <ul className="list-disc list-inside space-y-0.5 leading-snug">
+            <li>レアリティ表記 (右下/左下の小さな文字 ・SR / SEC / P など) を確認</li>
+            <li>イラスト・背景・縁取りの色・箔押し有無を見比べる</li>
+            <li>パラレル/アルトアートはイラストや構図が通常版と異なることが多い</li>
+            <li>フリマでは <strong>表面・裏面・型番周辺の拡大写真</strong> を依頼すると確実</li>
+          </ul>
         </div>
 
-        <div>
-          <h2 className="font-bold mb-2">バリアント別 価格</h2>
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="bg-gray-100 text-left">
-                <th className="p-2 border-b">バリアント</th>
-                <th className="p-2 border-b">レアリティ</th>
-                <th className="p-2 border-b text-right">販売 (中央値)</th>
-                <th className="p-2 border-b text-right">販売レンジ</th>
-                <th className="p-2 border-b text-right">買取 (中央値)</th>
-                <th className="p-2 border-b text-right">買取率</th>
-                <th className="p-2 border-b">信頼度</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.cards.map((c) => {
-                const buyRate =
-                  c.sell_stats && c.buy_stats && c.sell_stats.median > 0
-                    ? Math.round((c.buy_stats.median / c.sell_stats.median) * 100)
-                    : null;
-                const conf = c.sell_stats?.confidence ?? c.buy_stats?.confidence ?? null;
-                return (
-                  <tr key={c.id} className="border-b align-top">
-                    <td className="p-2">
-                      <span
-                        className="inline-block w-3 h-3 rounded-full mr-2 align-middle"
-                        style={{ background: VARIANT_COLOR[c.variant] ?? "#999" }}
-                      />
-                      {VARIANT_LABEL[c.variant] ?? c.variant}
-                    </td>
-                    <td className="p-2">{c.rarity}</td>
-                    <td className="p-2 text-right tabular-nums">
-                      {c.sell_price != null ? `¥${c.sell_price.toLocaleString()}` : "-"}
-                    </td>
-                    <td className="p-2 text-right text-xs text-gray-600 tabular-nums">
-                      {c.sell_stats && c.sell_stats.min !== c.sell_stats.max
-                        ? `¥${c.sell_stats.min.toLocaleString()}〜¥${c.sell_stats.max.toLocaleString()}`
-                        : "-"}
-                    </td>
-                    <td className="p-2 text-right tabular-nums">
-                      {c.buy_price != null ? `¥${c.buy_price.toLocaleString()}` : "-"}
-                    </td>
-                    <td className="p-2 text-right tabular-nums">
-                      {buyRate != null ? `${buyRate}%` : "-"}
-                    </td>
-                    <td className="p-2">
-                      {conf ? <ConfidenceBadge confidence={conf} /> : "-"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {/* 集計サマリ (販売・買取それぞれデータがある最初のバリアント) */}
-          {(() => {
-            const sell = data.cards.find((c) => c.sell_stats)?.sell_stats;
-            const buy = data.cards.find((c) => c.buy_stats)?.buy_stats;
-            return (
-              <>
-                {sell && <PriceStatsSummary stats={sell} priceType="sell" />}
-                {buy && <PriceStatsSummary stats={buy} priceType="buy" />}
-              </>
-            );
-          })()}
-
-          <p className="text-xs text-gray-500 mt-2">
-            ※ 複数の取扱いサイトから集計した中央値を表示しています
-          </p>
-        </div>
+        <p className="text-xs text-gray-500 mt-2">
+          ※ 複数の取扱いサイトから集計した中央値を表示しています
+        </p>
       </div>
 
       <section className="mb-8">
