@@ -67,10 +67,14 @@ export default async function HomeHero() {
       {/* ヒーロー */}
       <div className="text-center py-8 px-4 bg-gradient-to-br from-gray-900 via-gray-800 to-blue-900 text-white rounded-xl mb-6 shadow-lg">
         <h1 className="text-2xl sm:text-3xl font-bold mb-2 leading-tight">
-          写真1枚で <span className="text-yellow-300">PSA/BGS基準</span> のスコア
+          ワンピカードの<span className="text-yellow-300">型番・相場・値上がり</span>を
+          <br className="hidden sm:block" />
+          まとめてチェック
         </h1>
-        <p className="text-sm sm:text-base text-gray-300 mb-4">
-          ワンピカード全カードの<span className="text-blue-300 font-bold">中央値相場</span>と組み合わせて無料でチェック
+        <p className="text-sm sm:text-base text-gray-200 mb-4 leading-relaxed">
+          AIでカードを特定し、<span className="text-blue-300 font-semibold">価格DB</span>と照合。
+          <br className="hidden sm:block" />
+          <span className="text-gray-300">フリマ購入前・仕入れ判断・PSA提出前の確認に。</span>
         </p>
         <div className="flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm">
           {stats.cardCount > 0 && (
@@ -88,12 +92,27 @@ export default async function HomeHero() {
             🆓 完全無料
           </span>
         </div>
-        <a
-          href="#grade"
-          className="mt-5 inline-block px-6 py-2 bg-yellow-400 text-gray-900 font-bold rounded-full text-sm hover:bg-yellow-300 transition-colors"
-        >
-          鑑定をはじめる ↓
-        </a>
+        {/* 主要導線 */}
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          <a
+            href="#grade"
+            className="inline-block px-5 py-2 bg-yellow-400 text-gray-900 font-bold rounded-full text-sm hover:bg-yellow-300 transition-colors"
+          >
+            📸 カードをチェック
+          </a>
+          <a
+            href="/cards"
+            className="inline-block px-5 py-2 bg-white/15 backdrop-blur text-white font-semibold rounded-full text-sm hover:bg-white/25 border border-white/20 transition-colors"
+          >
+            📚 価格DBを見る
+          </a>
+          <a
+            href="/trending"
+            className="inline-block px-5 py-2 bg-white/15 backdrop-blur text-white font-semibold rounded-full text-sm hover:bg-white/25 border border-white/20 transition-colors"
+          >
+            📈 値上がりカード
+          </a>
+        </div>
       </div>
 
       {/* 値上がり Top 3 */}

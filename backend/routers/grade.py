@@ -1,7 +1,6 @@
 """鑑定APIルーター（Supabase永続化対応）"""
 
 import cv2
-import numpy as np
 import base64
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import Optional
@@ -9,6 +8,7 @@ from typing import Optional
 from ..services.grading import grade_card
 from ..services.card_brands import brands_to_api_response
 from ..services.ebay import search_sold_items
+from ..services.image_validation import validate_image_bytes
 from ..db.supabase_client import (
     insert_grading,
     get_grading,
@@ -37,29 +37,47 @@ async def create_grade(
     brand: str = Form(""),
     rarity: str = Form(""),
     manual_centering: Optional[str] = Form(None),
+    back_manual_centering: Optional[str] = Form(None),
 ):
-    """カード鑑定を実行し、結果をDBに永続化する"""
-    if front_image.content_type not in ("image/jpeg", "image/png", "image/webp"):
-        raise HTTPException(400, "対応画像形式: JPEG, PNG, WebP")
-
+    """カード鑑定を実行し、結果をDBに永続化する。
+    back_image が指定された場合は表+裏を1ショットで処理する。"""
     image_bytes = await front_image.read()
-    if len(image_bytes) > 20 * 1024 * 1024:
-        raise HTTPException(400, "画像サイズは20MB以下にしてください")
+    validate_image_bytes(image_bytes, front_image.content_type, label="表面画像")
 
-    if len(image_bytes) == 0:
-        raise HTTPException(400, "画像データが空です")
+    # 裏面画像の検証 (任意)
+    back_image_bytes: Optional[bytes] = None
+    if back_image is not None:
+        raw = await back_image.read()
+        if len(raw) > 0:
+            validate_image_bytes(raw, back_image.content_type, label="裏面画像")
+            back_image_bytes = raw
 
     # 手動センタリングデータのパース
+    import json
     manual_centering_data = None
     if manual_centering:
-        import json
         try:
             manual_centering_data = json.loads(manual_centering)
         except json.JSONDecodeError:
             pass
 
+    back_manual_centering_data = None
+    if back_manual_centering:
+        try:
+            back_manual_centering_data = json.loads(back_manual_centering)
+        except json.JSONDecodeError:
+            pass
+
     try:
-        result = grade_card(image_bytes, card_type=card_type, brand=brand, rarity=rarity, manual_centering=manual_centering_data)
+        result = grade_card(
+            image_bytes,
+            card_type=card_type,
+            brand=brand,
+            rarity=rarity,
+            manual_centering=manual_centering_data,
+            back_image_bytes=back_image_bytes,
+            back_manual_centering=back_manual_centering_data,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -88,6 +106,24 @@ async def create_grade(
                 overlay_jpg = base64.b64decode(overlay_b64)
                 overlay_url = await upload_image(overlay_jpg, grading_id, overlay_key)
                 await save_grading_image(grading_id, overlay_key, overlay_url)
+
+        # 裏面画像
+        back_analysis = result.get("back_analysis") or {}
+        if back_image_bytes and back_analysis and not back_analysis.get("error"):
+            back_original_url = await upload_image(back_image_bytes, grading_id, "back_original")
+            await save_grading_image(grading_id, "back_original", back_original_url)
+
+            back_card_b64 = back_analysis.get("card_image")
+            if back_card_b64:
+                back_card_jpg = base64.b64decode(back_card_b64)
+                back_card_url = await upload_image(back_card_jpg, grading_id, "back_card")
+                await save_grading_image(grading_id, "back_card", back_card_url)
+
+            back_overlay_b64 = back_analysis.get("centering_overlay")
+            if back_overlay_b64:
+                back_overlay_jpg = base64.b64decode(back_overlay_b64)
+                back_overlay_url = await upload_image(back_overlay_jpg, grading_id, "back_centering")
+                await save_grading_image(grading_id, "back_centering", back_overlay_url)
 
     except Exception as e:
         # DB保存失敗してもレスポンスは返す（鑑定結果は取得済み）
@@ -141,19 +177,10 @@ async def preprocess_image(
     front_image: UploadFile = File(...),
 ):
     """画像の正面化（パースペクティブ補正）だけを行い、補正済み画像を返す"""
-    if front_image.content_type not in ("image/jpeg", "image/png", "image/webp"):
-        raise HTTPException(400, "対応画像形式: JPEG, PNG, WebP")
-
     image_bytes = await front_image.read()
-    if len(image_bytes) == 0:
-        raise HTTPException(400, "画像データが空です")
+    image = validate_image_bytes(image_bytes, front_image.content_type, label="画像")
 
     from ..services.preprocessing import detect_card, find_card_bbox_in_normalized
-
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if image is None:
-        raise HTTPException(400, "画像のデコードに失敗しました")
 
     # 長辺1200pxにリサイズ
     h, w = image.shape[:2]
@@ -196,17 +223,8 @@ async def suggest_cards(
     1) 正面化 → 型番OCR → DB完全一致（distance=0、全variant）
     2) OCR失敗時は pHash 近傍で fallback（distance付き）
     """
-    if front_image.content_type not in ("image/jpeg", "image/png", "image/webp"):
-        raise HTTPException(400, "対応画像形式: JPEG, PNG, WebP")
-
     image_bytes = await front_image.read()
-    if not image_bytes:
-        raise HTTPException(400, "画像データが空です")
-
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if image is None:
-        raise HTTPException(400, "画像のデコードに失敗しました")
+    image = validate_image_bytes(image_bytes, front_image.content_type, label="画像")
 
     # 1600px に抑える（OCR用は解像度を犠牲にしない）
     h, w = image.shape[:2]

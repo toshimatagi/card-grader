@@ -7,20 +7,30 @@ import CenteringEditor from "../centering/CenteringEditor";
 import CardNameAutocomplete from "../cards/CardNameAutocomplete";
 import CameraCapture from "../camera/CameraCapture";
 
-type AppStep = "upload" | "centering" | "result";
+type AppStep = "upload" | "centering_front" | "centering_back" | "result";
+type CameraTarget = "front" | "back" | null;
 
 export default function GradeApp() {
+  // 表面
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<GradeResult | null>(null);
-  const [dragActive, setDragActive] = useState(false);
-  const [step, setStep] = useState<AppStep>("upload");
   const [manualCentering, setManualCentering] = useState<Record<string, unknown> | null>(null);
   const [correctedImage, setCorrectedImage] = useState<string | null>(null);
   const [outerBox, setOuterBox] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
-  const [cameraOpen, setCameraOpen] = useState(false);
+
+  // 裏面 (任意)
+  const [backFile, setBackFile] = useState<File | null>(null);
+  const [backPreview, setBackPreview] = useState<string | null>(null);
+  const [backManualCentering, setBackManualCentering] = useState<Record<string, unknown> | null>(null);
+  const [backCorrectedImage, setBackCorrectedImage] = useState<string | null>(null);
+  const [backOuterBox, setBackOuterBox] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<GradeResult | null>(null);
+  const [dragActive, setDragActive] = useState<"front" | "back" | null>(null);
+  const [step, setStep] = useState<AppStep>("upload");
+  const [cameraTarget, setCameraTarget] = useState<CameraTarget>(null);
 
   // ブランド・レアリティ選択
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -74,30 +84,59 @@ export default function GradeApp() {
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target?.result as string);
     reader.readAsDataURL(f);
-    // 画像が来たらAIで型番・名前を抽出 (バックグラウンド)
     runIdentify(f);
   }, [runIdentify]);
 
-  const handleDrop = useCallback(
+  const handleBackFile = useCallback((f: File) => {
+    setBackFile(f);
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => setBackPreview(e.target?.result as string);
+    reader.readAsDataURL(f);
+  }, []);
+
+  const handleDropFront = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      setDragActive(false);
+      setDragActive(null);
       const f = e.dataTransfer.files[0];
       if (f && f.type.startsWith("image/")) handleFile(f);
     },
     [handleFile]
   );
 
-  // 「鑑定開始」ボタン → 正面化API → センタリングエディターへ
+  const handleDropBack = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragActive(null);
+      const f = e.dataTransfer.files[0];
+      if (f && f.type.startsWith("image/")) handleBackFile(f);
+    },
+    [handleBackFile]
+  );
+
+  // 「鑑定開始」ボタン → 表+(裏)を一括 preprocess → 表面のセンタリングへ
   const handleSubmit = async () => {
     if (!file) return;
     setLoading(true);
     setError(null);
     try {
-      const preprocessed = await preprocessImage(file);
-      setCorrectedImage(`data:image/jpeg;base64,${preprocessed.card_image}`);
-      setOuterBox(preprocessed.outer_box ?? null);
-      setStep("centering");
+      const tasks: Promise<unknown>[] = [
+        preprocessImage(file).then((pre) => {
+          setCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
+          setOuterBox(pre.outer_box ?? null);
+        }),
+      ];
+      if (backFile) {
+        tasks.push(
+          preprocessImage(backFile).then((pre) => {
+            setBackCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
+            setBackOuterBox(pre.outer_box ?? null);
+          })
+        );
+      }
+      await Promise.all(tasks);
+      setStep("centering_front");
     } catch (e) {
       setError(e instanceof Error ? e.message : "前処理に失敗しました");
     } finally {
@@ -108,12 +147,17 @@ export default function GradeApp() {
   const resetForm = () => {
     setFile(null);
     setPreview(null);
+    setBackFile(null);
+    setBackPreview(null);
     setResult(null);
     setError(null);
     setStep("upload");
     setManualCentering(null);
+    setBackManualCentering(null);
     setCorrectedImage(null);
+    setBackCorrectedImage(null);
     setOuterBox(null);
+    setBackOuterBox(null);
     setSelectedCardId(null);
     setSelectedCardCode(null);
     setIdentifyResult(null);
@@ -126,46 +170,64 @@ export default function GradeApp() {
     setCardName(`${c.name_ja} ${c.set_code}-${c.card_no} ${c.rarity}`);
   };
 
-  // センタリングエディターからの結果で鑑定開始
-  const handleCenteringComplete = async (centeringResult: Record<string, unknown>) => {
+  // grade API を1回叩いて結果取得
+  const submitGrade = async (
+    frontCentering: Record<string, unknown> | null,
+    backCentering: Record<string, unknown> | null,
+  ) => {
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+    setStep("result");
+    try {
+      const res = await gradeCard(
+        file,
+        cardType,
+        selectedBrand,
+        selectedRarity,
+        frontCentering ?? undefined,
+        backFile ?? undefined,
+        backCentering ?? undefined,
+      );
+      setResult(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "エラーが発生しました");
+      setStep(backFile ? "centering_back" : "centering_front");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 表面センタリング完了 → 裏あれば裏面ステップへ、無ければ即grade
+  const handleFrontCenteringComplete = async (centeringResult: Record<string, unknown>) => {
     setManualCentering(centeringResult);
-    if (!file) return;
-    setLoading(true);
-    setError(null);
-    setStep("result");
-    try {
-      const res = await gradeCard(file, cardType, selectedBrand, selectedRarity, centeringResult);
-      setResult(res);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "エラーが発生しました");
-      setStep("centering");
-    } finally {
-      setLoading(false);
+    if (backFile) {
+      setStep("centering_back");
+    } else {
+      await submitGrade(centeringResult, null);
     }
   };
 
-  // 自動検出で鑑定（センタリングエディターをスキップ）
-  const handleSkipCentering = async () => {
-    if (!file) return;
-    setLoading(true);
-    setError(null);
-    setStep("result");
-    try {
-      const res = await gradeCard(file, cardType, selectedBrand, selectedRarity);
-      setResult(res);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "エラーが発生しました");
-      setStep("upload");
-    } finally {
-      setLoading(false);
+  // 表面センタリング自動 (スキップ)
+  const handleFrontSkipCentering = async () => {
+    setManualCentering(null);
+    if (backFile) {
+      setStep("centering_back");
+    } else {
+      await submitGrade(null, null);
     }
   };
 
-  const brandIcons: Record<string, string> = {
-    pokemon: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png",
-    onepiece: "",
-    dragonball_fw: "",
-    yugioh: "",
+  // 裏面センタリング完了 → grade
+  const handleBackCenteringComplete = async (centeringResult: Record<string, unknown>) => {
+    setBackManualCentering(centeringResult);
+    await submitGrade(manualCentering, centeringResult);
+  };
+
+  // 裏面センタリング自動 (スキップ)
+  const handleBackSkipCentering = async () => {
+    setBackManualCentering(null);
+    await submitGrade(manualCentering, null);
   };
 
   const brandEmojis: Record<string, string> = {
@@ -177,35 +239,76 @@ export default function GradeApp() {
 
   return (
     <div>
-      {cameraOpen && (
+      {cameraTarget !== null && (
         <CameraCapture
           onCapture={(f) => {
-            handleFile(f);
-            setCameraOpen(false);
+            if (cameraTarget === "front") {
+              handleFile(f);
+            } else if (cameraTarget === "back") {
+              handleBackFile(f);
+            }
+            setCameraTarget(null);
           }}
-          onClose={() => setCameraOpen(false)}
+          onClose={() => setCameraTarget(null)}
         />
       )}
 
-      {/* Step 2: センタリングエディター */}
-      {step === "centering" && (correctedImage || preview) && (
+      {/* Step 2a: 表面センタリングエディター */}
+      {step === "centering_front" && (correctedImage || preview) && (
         <div className="max-w-2xl mx-auto">
           <button
             onClick={() => setStep("upload")}
-            className="mb-4 text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
+            className="mb-2 text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
           >
             ← 戻る
           </button>
+          <div className="mb-3 flex items-center gap-2 text-xs">
+            <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+              {backFile ? "1 / 2" : "1 / 1"}
+            </span>
+            <span className="font-medium text-gray-700">表面のセンタリング測定</span>
+          </div>
           <CenteringEditor
             imageSrc={correctedImage || preview!}
-            onComplete={(r) => handleCenteringComplete(r as unknown as Record<string, unknown>)}
-            onSkip={handleSkipCentering}
+            onComplete={(r) => handleFrontCenteringComplete(r as unknown as Record<string, unknown>)}
+            onSkip={handleFrontSkipCentering}
             fullartMode={(() => {
               const r = currentBrand?.rarities.find((x) => x.id === selectedRarity);
               return !!r && (!r.has_border || r.border_type === "none");
             })()}
             cardKind={selectedRarity === "l" ? "leader" : "character"}
             initialOuter={outerBox}
+          />
+          {error && (
+            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Step 2b: 裏面センタリングエディター */}
+      {step === "centering_back" && (backCorrectedImage || backPreview) && (
+        <div className="max-w-2xl mx-auto">
+          <button
+            onClick={() => setStep("centering_front")}
+            className="mb-2 text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
+          >
+            ← 表面センタリングへ戻る
+          </button>
+          <div className="mb-3 flex items-center gap-2 text-xs">
+            <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
+              2 / 2
+            </span>
+            <span className="font-medium text-gray-700">裏面のセンタリング測定</span>
+          </div>
+          <CenteringEditor
+            imageSrc={backCorrectedImage || backPreview!}
+            onComplete={(r) => handleBackCenteringComplete(r as unknown as Record<string, unknown>)}
+            onSkip={handleBackSkipCentering}
+            fullartMode={false}
+            cardKind="character"
+            initialOuter={backOuterBox}
           />
           {loading && (
             <div className="mt-4 text-center">
@@ -225,84 +328,138 @@ export default function GradeApp() {
       {step === "upload" ? (
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-6" id="grade">
-            <h2 className="text-2xl font-bold mb-1">📸 鑑定する</h2>
+            <h2 className="text-2xl font-bold mb-1">📸 表裏チェック</h2>
             <p className="text-sm text-gray-600">
-              カード画像をアップロードまたは撮影
+              表面と裏面の画像を1セットでチェックします (裏面は任意)
             </p>
           </div>
 
-          {/* アップロードエリア */}
-          <div
-            className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
-              dragActive
-                ? "border-blue-500 bg-blue-50"
-                : "border-gray-300 hover:border-gray-400"
-            }`}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={handleDrop}
-            onClick={() => document.getElementById("file-input")?.click()}
-          >
-            <input
-              id="file-input"
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleFile(f);
+          <div className="grid sm:grid-cols-2 gap-3">
+            {/* 表面 */}
+            <div
+              className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors cursor-pointer ${
+                dragActive === "front"
+                  ? "border-blue-500 bg-blue-50"
+                  : preview
+                  ? "border-blue-300 bg-blue-50/30"
+                  : "border-gray-300 hover:border-gray-400"
+              }`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragActive("front");
               }}
-            />
+              onDragLeave={() => setDragActive(null)}
+              onDrop={handleDropFront}
+              onClick={() => document.getElementById("front-file-input")?.click()}
+            >
+              <input
+                id="front-file-input"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleFile(f);
+                }}
+              />
+              <div className="flex items-center justify-center gap-2 mb-2 text-sm font-medium">
+                <span>🃏 表面</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full ${preview ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600"}`}>
+                  {preview ? "登録済" : "未登録"}
+                </span>
+                <span className="text-[10px] text-red-500">必須</span>
+              </div>
+              {preview ? (
+                <img src={preview} alt="表面プレビュー" className="max-h-48 mx-auto rounded shadow" />
+              ) : (
+                <div className="py-6">
+                  <div className="text-3xl mb-1">📷</div>
+                  <div className="text-xs text-gray-500">クリック / ドロップ</div>
+                </div>
+              )}
+            </div>
 
-            {preview ? (
-              <div className="space-y-4">
-                <img
-                  src={preview}
-                  alt="プレビュー"
-                  className="max-h-80 mx-auto rounded-lg shadow-md"
-                />
-                <p className="text-sm text-gray-500">{file?.name}</p>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    resetForm();
-                  }}
-                  className="text-sm text-red-500 hover:text-red-700"
-                >
-                  画像を変更
-                </button>
+            {/* 裏面 */}
+            <div
+              className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors cursor-pointer ${
+                dragActive === "back"
+                  ? "border-purple-500 bg-purple-50"
+                  : backPreview
+                  ? "border-purple-300 bg-purple-50/30"
+                  : "border-gray-300 hover:border-gray-400"
+              }`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragActive("back");
+              }}
+              onDragLeave={() => setDragActive(null)}
+              onDrop={handleDropBack}
+              onClick={() => document.getElementById("back-file-input")?.click()}
+            >
+              <input
+                id="back-file-input"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleBackFile(f);
+                }}
+              />
+              <div className="flex items-center justify-center gap-2 mb-2 text-sm font-medium">
+                <span>📐 裏面</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full ${backPreview ? "bg-purple-600 text-white" : "bg-gray-200 text-gray-600"}`}>
+                  {backPreview ? "登録済" : "未登録"}
+                </span>
+                <span className="text-[10px] text-gray-500">任意</span>
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="text-5xl">📸</div>
-                <p className="text-lg font-medium">
-                  カード画像をドラッグ&ドロップ
-                </p>
-                <p className="text-sm text-gray-500">
-                  またはクリックしてファイルを選択
-                </p>
-                <p className="text-xs text-gray-400">
-                  JPEG / PNG / WebP (推奨: 1000x1400px以上)
-                </p>
-              </div>
+              {backPreview ? (
+                <img src={backPreview} alt="裏面プレビュー" className="max-h-48 mx-auto rounded shadow" />
+              ) : (
+                <div className="py-6">
+                  <div className="text-3xl mb-1">🔄</div>
+                  <div className="text-xs text-gray-500">白かけ・角欠け確認用</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* カメラ・変更ボタン */}
+          <div className="mt-3 flex flex-wrap gap-2 justify-center">
+            <button
+              type="button"
+              onClick={() => setCameraTarget("front")}
+              className="px-3 py-1.5 rounded-full border border-blue-500 text-blue-600 text-xs font-medium hover:bg-blue-50 transition-colors"
+            >
+              📷 表面をカメラで撮る
+            </button>
+            <button
+              type="button"
+              onClick={() => setCameraTarget("back")}
+              className="px-3 py-1.5 rounded-full border border-purple-500 text-purple-600 text-xs font-medium hover:bg-purple-50 transition-colors"
+            >
+              📷 裏面をカメラで撮る
+            </button>
+            {(file || backFile) && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="px-3 py-1.5 rounded-full text-xs text-red-500 hover:text-red-700"
+              >
+                すべてクリア
+              </button>
             )}
           </div>
 
-          {/* カメラで撮影ボタン (主にスマホ向け、PCでも内蔵カメラで動作) */}
-          {!preview && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setCameraOpen(true);
-              }}
-              className="mt-3 w-full py-3 rounded-lg border-2 border-blue-500 text-blue-600 font-medium hover:bg-blue-50 transition-colors flex items-center justify-center gap-2"
-            >
-              📷 カメラで撮影 (枠ガイド・水平表示付き)
-            </button>
+          <p className="mt-2 text-[11px] text-gray-500 text-center">
+            JPEG / PNG / WebP (推奨: 1000x1400px 以上)。四隅がすべて見えるように撮影してください。
+          </p>
+
+          {/* 裏面なしリスク (表面のみ登録時) */}
+          {file && !backFile && (
+            <div className="mt-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+              ⚠️ 裏面なしでチェックします。<strong>白かけ・角欠け・エッジ傷</strong>は確認できません。PSA提出前・美品仕入れの判断には裏面の登録を推奨します。
+            </div>
           )}
 
           {/* AI識別結果 */}
@@ -522,12 +679,14 @@ export default function GradeApp() {
             {loading ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                鑑定中...
+                準備中...
               </span>
             ) : !selectedBrand ? (
               "ブランドを選択してください"
+            ) : !file ? (
+              "表面画像をアップロードしてください"
             ) : (
-              "鑑定開始"
+              `${backFile ? "表裏" : "表面のみで"}チェックを開始`
             )}
           </button>
 
@@ -564,13 +723,14 @@ export default function GradeApp() {
             onClick={resetForm}
             className="mb-6 text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
           >
-            ← 新しいカードを鑑定
+            ← 新しいカードをチェック
           </button>
           <GradeResultView
             result={result}
             cardName={cardName}
             brand={selectedBrand}
             cardCode={selectedCardCode ?? undefined}
+            hasBackImage={!!backFile}
           />
         </div>
       ) : step === "result" && loading ? (

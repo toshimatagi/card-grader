@@ -5,6 +5,13 @@ export interface SubGrade {
   detail: Record<string, unknown>;
 }
 
+export interface BackAnalysis {
+  card_image: string;
+  centering: SubGrade;
+  centering_overlay: string;
+  error?: string;
+}
+
 export interface GradeResult {
   id: string;
   overall_grade: number;
@@ -18,6 +25,7 @@ export interface GradeResult {
     edges_corners: SubGrade;
   };
   overlay_images: Record<string, string>;
+  back_analysis?: BackAnalysis | null;
   created_at: string;
 }
 
@@ -79,7 +87,9 @@ export async function gradeCard(
   cardType: string = "standard",
   brand: string = "",
   rarity: string = "",
-  manualCentering?: Record<string, unknown>
+  manualCentering?: Record<string, unknown>,
+  backImage?: File | null,
+  backManualCentering?: Record<string, unknown> | null,
 ): Promise<GradeResult> {
   const formData = new FormData();
   formData.append("front_image", frontImage);
@@ -88,6 +98,12 @@ export async function gradeCard(
   formData.append("rarity", rarity);
   if (manualCentering) {
     formData.append("manual_centering", JSON.stringify(manualCentering));
+  }
+  if (backImage) {
+    formData.append("back_image", backImage);
+  }
+  if (backManualCentering) {
+    formData.append("back_manual_centering", JSON.stringify(backManualCentering));
   }
 
   const controller = new AbortController();

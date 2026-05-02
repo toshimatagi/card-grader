@@ -4,7 +4,6 @@ import { useState } from "react";
 import { GradeResult } from "../../lib/api";
 import ScoreGauge from "./ScoreGauge";
 import CardPriceSummary from "../cards/CardPriceSummary";
-import BackSideCentering from "../centering/BackSideCentering";
 
 interface Props {
   result: GradeResult;
@@ -13,6 +12,23 @@ interface Props {
   shareUrl?: string;
   cardId?: string;
   cardCode?: string;
+  hasBackImage?: boolean;
+}
+
+function bigSide(ratio: string): number {
+  const [a, b] = ratio.split("/").map((n) => parseInt(n, 10));
+  return Math.max(a || 0, b || 0);
+}
+
+function worstRatio(a: string, b: string): string {
+  return bigSide(a) >= bigSide(b) ? a : b;
+}
+
+function ratioColor(ratio: string): string {
+  const big = bigSide(ratio);
+  if (big <= 55) return "text-green-600";
+  if (big <= 60) return "text-yellow-600";
+  return "text-red-600";
 }
 
 const SUB_GRADE_LABELS: Record<string, { label: string; icon: string }> = {
@@ -29,7 +45,7 @@ const OVERLAY_LABELS: Record<string, string> = {
   edges_corners: "エッジ・角",
 };
 
-export default function GradeResultView({ result, cardName, brand, shareUrl: shareUrlProp, cardCode }: Props) {
+export default function GradeResultView({ result, cardName, brand, shareUrl: shareUrlProp, cardCode, hasBackImage }: Props) {
   const [activeOverlay, setActiveOverlay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showCrosshair, setShowCrosshair] = useState(false);
@@ -117,17 +133,17 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm font-medium text-gray-600 mb-1">
-              総合グレード
+              総合スコア (目安)
             </div>
             <div className={`text-5xl font-bold ${gradeColor(result.overall_grade)}`}>
               {result.overall_grade.toFixed(1)}
             </div>
             <div className="text-sm text-gray-500 mt-1">
-              / 10.0 (PSA基準)
+              / 10.0
             </div>
           </div>
           <div className="text-right">
-            <div className="text-sm text-gray-600">信頼度</div>
+            <div className="text-sm text-gray-600">画像分析の信頼度</div>
             <div className="text-2xl font-semibold">
               {(result.confidence * 100).toFixed(0)}%
             </div>
@@ -135,6 +151,9 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
               カードタイプ: {result.card_type === "standard" ? "スタンダード" : "スモール"}
             </div>
           </div>
+        </div>
+        <div className="mt-3 pt-3 border-t border-black/10 text-[11px] text-gray-600 leading-snug">
+          ※ 本スコアは PSA/BGS の正式鑑定ではなく、画像から計算した <strong>状態チェック目安</strong> です。PSA10 等の取得を保証するものではありません。
         </div>
       </div>
 
@@ -396,16 +415,138 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
         </div>
       </div>
 
-      {/* 裏面センタリング (任意) */}
-      <BackSideCentering
-        frontCentering={{
-          lr_ratio: result.sub_grades.centering.detail.lr_ratio as string | undefined,
-          tb_ratio: result.sub_grades.centering.detail.tb_ratio as string | undefined,
-        }}
-      />
+      {/* 裏面解析 (1ショットで処理済) */}
+      {result.back_analysis && !result.back_analysis.error ? (
+        <BackAnalysisSection
+          back={result.back_analysis}
+          frontCentering={{
+            lr_ratio: result.sub_grades.centering.detail.lr_ratio as string | undefined,
+            tb_ratio: result.sub_grades.centering.detail.tb_ratio as string | undefined,
+          }}
+        />
+      ) : hasBackImage && result.back_analysis?.error ? (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+          ⚠️ 裏面の解析に失敗しました: {result.back_analysis.error}
+        </div>
+      ) : (
+        <NoBackImageWarning />
+      )}
 
       {/* 価格DB（販売・買取の中央値） */}
       {cardCode && <CardPriceSummary code={cardCode} />}
+    </div>
+  );
+}
+
+function BackAnalysisSection({
+  back,
+  frontCentering,
+}: {
+  back: NonNullable<GradeResult["back_analysis"]>;
+  frontCentering: { lr_ratio?: string; tb_ratio?: string };
+}) {
+  const [showOverlay, setShowOverlay] = useState(false);
+  const lr = String(back.centering.detail.lr_ratio ?? "50/50");
+  const tb = String(back.centering.detail.tb_ratio ?? "50/50");
+
+  return (
+    <div className="bg-white rounded-xl border shadow-sm p-6">
+      <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+        📐 裏面の解析
+        <span className="text-xs text-gray-500 font-normal">
+          (センタリング測定)
+        </span>
+      </h2>
+      <p className="text-xs text-gray-600 mb-4">
+        裏面のセンタリング測定結果です。PSA等では <strong>表裏のうち悪い方</strong> が採用されるため、両面の確認が重要です。
+      </p>
+
+      {/* 裏面画像 */}
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            onClick={() => setShowOverlay(false)}
+            className={`px-3 py-1 rounded-full text-xs transition-colors ${
+              !showOverlay ? "bg-gray-900 text-white" : "bg-gray-100 hover:bg-gray-200"
+            }`}
+          >
+            裏面画像
+          </button>
+          <button
+            onClick={() => setShowOverlay(true)}
+            className={`px-3 py-1 rounded-full text-xs transition-colors ${
+              showOverlay ? "bg-blue-600 text-white" : "bg-gray-100 hover:bg-gray-200"
+            }`}
+          >
+            センタリング解析
+          </button>
+        </div>
+        <div className="flex justify-center">
+          <img
+            src={`data:image/jpeg;base64,${
+              showOverlay ? back.centering_overlay : back.card_image
+            }`}
+            alt={showOverlay ? "裏面センタリング解析" : "裏面"}
+            className="max-h-[400px] rounded-lg shadow"
+          />
+        </div>
+      </div>
+
+      {/* 比較ブロック */}
+      {frontCentering.lr_ratio && frontCentering.tb_ratio ? (
+        <div className="border rounded-lg p-3 bg-blue-50 mb-3">
+          <div className="text-xs font-medium text-blue-900 mb-2">
+            ⚖️ 表裏センタリングの比較
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="text-center">
+              <div className="text-gray-500 text-[10px]">表面</div>
+              <div className="font-medium">
+                {frontCentering.lr_ratio} / {frontCentering.tb_ratio}
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-gray-500 text-[10px]">裏面</div>
+              <div className="font-medium">{lr} / {tb}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-gray-500 text-[10px]">採用 (悪い方)</div>
+              <div className="font-bold text-blue-700">
+                {worstRatio(frontCentering.lr_ratio, lr)} /{" "}
+                {worstRatio(frontCentering.tb_ratio, tb)}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 text-center bg-gray-50 rounded-lg p-3 mb-3">
+          <div>
+            <div className="text-xs text-gray-500">裏面 左右</div>
+            <div className={`text-2xl font-bold ${ratioColor(lr)}`}>{lr}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">裏面 上下</div>
+            <div className={`text-2xl font-bold ${ratioColor(tb)}`}>{tb}</div>
+          </div>
+        </div>
+      )}
+
+      <div className="text-[11px] text-gray-500">
+        ※ 白かけ・角欠け・エッジ傷の自動検出は、裏面の均一パターン上では精度が低いため、目視確認 (拡大画像) を推奨します。
+      </div>
+    </div>
+  );
+}
+
+function NoBackImageWarning() {
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
+      <div className="font-semibold mb-1">⚠️ 裏面未確認</div>
+      <ul className="list-disc list-inside space-y-0.5 text-xs leading-snug">
+        <li>裏面画像が登録されていないため、<strong>白かけ・角欠け・エッジ傷</strong>は確認できません。</li>
+        <li>裏面センタリングは PSA/BGS 鑑定で評価対象です。表裏のうち悪い方が採用されます。</li>
+        <li>PSA提出前・美品仕入れ判断には、裏面画像を含めた再チェックを推奨します。</li>
+      </ul>
     </div>
   );
 }

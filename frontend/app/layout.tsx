@@ -4,7 +4,7 @@ import GoogleAnalytics from "../components/GoogleAnalytics";
 import AdSense from "../components/AdSense";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
-const SITE_NAME = "TCG Authority - ワンピカード鑑定 & 価格DB";
+const SITE_NAME = "TCG Authority - ワンピカード型番・相場・状態チェック";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -13,11 +13,12 @@ export const metadata: Metadata = {
     template: "%s | TCG Authority",
   },
   description:
-    "ワンピースカードゲームの自動鑑定 (PSA/BGS基準) + 全カード価格DB。中央値ベースの相場と裁断・センタリング・表面・色印刷の4項目スコアを無料で確認。",
+    "ワンピカードの型番・相場・値上がりをまとめてチェック。AIでカードを特定し価格DBと照合。フリマ購入前・仕入れ判断・PSA提出前の確認に使える無料ツール。",
   keywords: [
     "ワンピースカード", "ワンピカード", "ONE PIECE TCG",
-    "カード鑑定", "PSA鑑定", "BGS鑑定", "センタリング",
     "カード相場", "ワンピカード価格", "高額カード",
+    "カード型番", "カード状態チェック", "フリマ購入前", "仕入れ",
+    "値上がり", "値上がりランキング", "センタリング",
   ],
   openGraph: {
     type: "website",
@@ -26,13 +27,13 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     title: SITE_NAME,
     description:
-      "写真1枚でカードの状態をPSA/BGS基準で自動鑑定。ワンピカード3000枚以上の最新価格相場も無料で閲覧。",
+      "AIでカードを特定し価格DBと照合。表裏画像から状態リスクをチェック。フリマ購入前・仕入れ判断・PSA提出前の確認に。",
   },
   twitter: {
     card: "summary_large_image",
     title: SITE_NAME,
     description:
-      "写真1枚でカードの状態をPSA/BGS基準で自動鑑定。ワンピカード3000枚以上の最新価格相場も無料で閲覧。",
+      "AIでカードを特定し価格DBと照合。表裏画像から状態リスクをチェック。フリマ購入前・仕入れ判断・PSA提出前の確認に。",
   },
   robots: {
     index: true,

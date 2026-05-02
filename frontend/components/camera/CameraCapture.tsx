@@ -349,8 +349,10 @@ function FrameOverlay({
       </div>
 
       {/* 下部ヒント */}
-      <div className="absolute left-0 right-0 bottom-3 text-center text-white text-xs px-4 drop-shadow">
-        カード全体を枠内に収め、画面と平行に保ってください
+      <div className="absolute left-0 right-0 bottom-3 text-center text-white text-xs px-4 drop-shadow leading-snug">
+        カードの<strong>四隅</strong>がすべて見えるように外枠に合わせて撮影してください。
+        <br />
+        反射・ピンボケ・斜め撮影は判定精度が下がります。
       </div>
     </div>
   );

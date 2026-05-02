@@ -27,17 +27,22 @@ WEIGHTS = {
 def grade_card(image_bytes: bytes, card_type: str = "standard",
                brand: str = "", rarity: str = "",
                options: dict | None = None,
-               manual_centering: dict | None = None) -> dict:
+               manual_centering: dict | None = None,
+               back_image_bytes: bytes | None = None,
+               back_manual_centering: dict | None = None) -> dict:
     """
-    カード画像を総合鑑定する。
+    カード画像を総合鑑定する。表面+裏面を1ショットで処理する。
 
     Args:
-        image_bytes: 画像のバイトデータ
+        image_bytes: 表面画像のバイトデータ
         card_type: カードタイプ (standard/small/custom)
         options: オプション設定
+        manual_centering: 表面の手動センタリング情報
+        back_image_bytes: 裏面画像のバイトデータ (任意)
+        back_manual_centering: 裏面の手動センタリング情報 (任意)
 
     Returns:
-        dict: 鑑定結果
+        dict: 鑑定結果。back_image_bytes 指定時は back_analysis を含む。
     """
     options = options or {"detailed_report": True, "overlay_images": True}
 
@@ -156,6 +161,15 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
 
     grade_id = str(uuid.uuid4())
 
+    # 裏面解析 (任意): 裏面はセンタリング測定のみ
+    back_analysis = None
+    if back_image_bytes is not None:
+        try:
+            back_analysis = _analyze_back_side(back_image_bytes, back_manual_centering)
+        except Exception as e:
+            print(f"[WARN] 裏面解析エラー: {e}")
+            back_analysis = {"error": str(e)}
+
     return {
         "id": grade_id,
         "overall_grade": overall_grade,
@@ -181,7 +195,43 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
             },
         },
         "overlay_images": overlay_images,
+        "back_analysis": back_analysis,
         "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _analyze_back_side(image_bytes: bytes,
+                       manual_centering: dict | None = None) -> dict:
+    """
+    裏面画像のセンタリング測定。
+    裏面は均一パターンのため surface/color/edges 分析は行わず、
+    センタリング測定 (手動 or 自動) のみを実施する。
+    """
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("裏面画像のデコードに失敗しました")
+
+    image = _resize_if_needed(image, max_side=1200)
+
+    use_trim = not (manual_centering and "lr_ratio" in manual_centering)
+    card_data = detect_card(image, trim=use_trim)
+    card_image = card_data["card_image"]
+    card_image = _resize_if_needed(card_image, max_side=800)
+
+    if manual_centering and "lr_ratio" in manual_centering:
+        centering_result = _build_manual_centering_result(manual_centering, card_image)
+    else:
+        # 裏面は枠のあるカードでも均一なので borderless モードで測定
+        centering_result = analyze_centering(card_image, mode="borderless")
+
+    return {
+        "card_image": _image_to_base64(card_image),
+        "centering": {
+            "score": centering_result["score"],
+            "detail": centering_result["detail"],
+        },
+        "centering_overlay": _image_to_base64(centering_result["overlay"]),
     }
 
 

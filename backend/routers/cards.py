@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 from ..services import gemini_identify
+from ..services.image_validation import validate_image_bytes
 
 router = APIRouter(prefix="/api/v1/cards", tags=["cards"])
 
@@ -122,8 +123,7 @@ async def get_card_by_code(code: str) -> dict:
 async def identify_card_endpoint(front_image: UploadFile = File(...)) -> dict:
     """画像から型番・カード名を Gemini Vision で識別し、DBで照合して詳細を返す"""
     image_bytes = await front_image.read()
-    if not image_bytes:
-        raise HTTPException(400, "画像が空です")
+    validate_image_bytes(image_bytes, front_image.content_type, label="画像")
     mime = front_image.content_type or "image/jpeg"
 
     result = await gemini_identify.identify_card(image_bytes, mime)
