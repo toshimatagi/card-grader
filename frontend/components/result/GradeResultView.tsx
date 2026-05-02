@@ -31,6 +31,8 @@ const OVERLAY_LABELS: Record<string, string> = {
 export default function GradeResultView({ result, cardName, brand, shareUrl: shareUrlProp, cardCode }: Props) {
   const [activeOverlay, setActiveOverlay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showCrosshair, setShowCrosshair] = useState(false);
+  const [showThirds, setShowThirds] = useState(false);
 
   const shareUrl =
     shareUrlProp ||
@@ -158,7 +160,7 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
         <h2 className="text-lg font-semibold mb-4">分析画像</h2>
 
         {/* オーバーレイ切替タブ */}
-        <div className="flex gap-2 mb-4 flex-wrap">
+        <div className="flex gap-2 mb-3 flex-wrap">
           <button
             onClick={() => setActiveOverlay(null)}
             className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
@@ -184,18 +186,83 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
           ))}
         </div>
 
-        {/* 画像表示 */}
-        <div className="flex justify-center">
-          <img
-            src={`data:image/jpeg;base64,${
-              activeOverlay && result.overlay_images[activeOverlay]
-                ? result.overlay_images[activeOverlay]
-                : result.card_image
+        {/* ガイドラインのトグル */}
+        <div className="flex gap-2 mb-4 flex-wrap items-center">
+          <span className="text-xs text-gray-500">ガイド:</span>
+          <button
+            onClick={() => setShowCrosshair((v) => !v)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              showCrosshair
+                ? "bg-red-500 text-white border-red-500"
+                : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
             }`}
-            alt={activeOverlay ? `${activeOverlay} overlay` : "カード画像"}
-            className="max-h-[500px] rounded-lg shadow-md"
-          />
+            title="画像の中央 (50:50) に十字線を表示"
+          >
+            ✚ 十字線 (50:50)
+          </button>
+          <button
+            onClick={() => setShowThirds((v) => !v)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              showThirds
+                ? "bg-blue-500 text-white border-blue-500"
+                : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+            }`}
+            title="三分割線 (1/3, 2/3) を表示"
+          >
+            ▦ 三分割線
+          </button>
         </div>
+
+        {/* 画像表示 (十字線オーバーレイ可能) */}
+        <div className="flex justify-center">
+          <div className="relative inline-block">
+            <img
+              src={`data:image/jpeg;base64,${
+                activeOverlay && result.overlay_images[activeOverlay]
+                  ? result.overlay_images[activeOverlay]
+                  : result.card_image
+              }`}
+              alt={activeOverlay ? `${activeOverlay} overlay` : "カード画像"}
+              className="max-h-[500px] rounded-lg shadow-md block"
+            />
+            {(showCrosshair || showThirds) && (
+              <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                className="absolute inset-0 w-full h-full pointer-events-none rounded-lg"
+              >
+                {showThirds && (
+                  <g stroke="rgb(96, 165, 250)" strokeWidth="0.25" strokeDasharray="1.5 1.5" vectorEffect="non-scaling-stroke" opacity="0.85">
+                    <line x1="33.333" y1="0" x2="33.333" y2="100" />
+                    <line x1="66.667" y1="0" x2="66.667" y2="100" />
+                    <line x1="0" y1="33.333" x2="100" y2="33.333" />
+                    <line x1="0" y1="66.667" x2="100" y2="66.667" />
+                  </g>
+                )}
+                {showCrosshair && (
+                  <g vectorEffect="non-scaling-stroke">
+                    {/* 半透明の白アウトライン (どんな背景色でも視認できるように) */}
+                    <line x1="50" y1="0" x2="50" y2="100" stroke="white" strokeWidth="0.9" opacity="0.6" />
+                    <line x1="0" y1="50" x2="100" y2="50" stroke="white" strokeWidth="0.9" opacity="0.6" />
+                    {/* 赤の本線 */}
+                    <line x1="50" y1="0" x2="50" y2="100" stroke="rgb(239, 68, 68)" strokeWidth="0.4" />
+                    <line x1="0" y1="50" x2="100" y2="50" stroke="rgb(239, 68, 68)" strokeWidth="0.4" />
+                    {/* 中心マーカー */}
+                    <circle cx="50" cy="50" r="0.9" fill="white" stroke="rgb(239, 68, 68)" strokeWidth="0.3" />
+                    {/* 軸ラベル */}
+                    <text x="51" y="3" fontSize="2.2" fill="rgb(239, 68, 68)" stroke="white" strokeWidth="0.4" paintOrder="stroke" fontWeight="bold">50%</text>
+                    <text x="0.5" y="51.7" fontSize="2.2" fill="rgb(239, 68, 68)" stroke="white" strokeWidth="0.4" paintOrder="stroke" fontWeight="bold">50%</text>
+                  </g>
+                )}
+              </svg>
+            )}
+          </div>
+        </div>
+        {showCrosshair && (
+          <p className="text-xs text-gray-500 text-center mt-2">
+            ✚ 画像の中央 (50:50) に十字線を表示中。印刷中央がこの線とどれだけズレているかでセンタリングを目視確認できます。
+          </p>
+        )}
       </div>
 
       {/* 詳細データ */}
