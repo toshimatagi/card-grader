@@ -175,40 +175,108 @@ async def delete_grade_history(grade_id: str):
 @router.post("/preprocess")
 async def preprocess_image(
     front_image: UploadFile = File(...),
+    corners: Optional[str] = Form(None),
 ):
-    """画像の正面化（パースペクティブ補正）だけを行い、補正済み画像を返す"""
+    """画像の正面化（パースペクティブ補正）を行い、補正済み画像を返す。
+
+    corners (JSON string) を渡すと自動検出をスキップしてその4点で warp する。
+    形式: {"tl":[x,y], "tr":[x,y], "br":[x,y], "bl":[x,y]}
+    座標系: 長辺1200pxにリサイズした後の画像座標。
+    レスポンスに original_image / original_corners / original_size を
+    必ず含めるので、フロントは2回目の呼出 (手動補正) でも同じ画像を扱える。
+    """
+    import json
+    import numpy as np
+
     image_bytes = await front_image.read()
     image = validate_image_bytes(image_bytes, front_image.content_type, label="画像")
 
-    from ..services.preprocessing import detect_card, find_card_bbox_in_normalized
+    from ..services.preprocessing import (
+        detect_card,
+        find_card_bbox_in_normalized,
+        order_points,
+        _fallback_full_image,
+    )
 
-    # 長辺1200pxにリサイズ
+    # 長辺1200pxにリサイズ (これが「original_size」の基準)
     h, w = image.shape[:2]
     if max(h, w) > 1200:
         scale = 1200 / max(h, w)
         image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+    h, w = image.shape[:2]
 
-    # 前処理: カード検出 + 正面化（トリミングなし＝背景を残す）
-    card_data = detect_card(image, trim=False)
-    card_image = card_data["card_image"]
+    # corners が指定されていれば手動 warp、なければ auto
+    user_corners: Optional[dict] = None
+    if corners:
+        try:
+            parsed = json.loads(corners)
+            user_corners = {k: parsed[k] for k in ("tl", "tr", "br", "bl")}
+        except (json.JSONDecodeError, KeyError, TypeError):
+            user_corners = None
 
-    # 長辺800pxにリサイズ
+    if user_corners:
+        pts = np.array(
+            [user_corners["tl"], user_corners["tr"], user_corners["br"], user_corners["bl"]],
+            dtype=np.float32,
+        )
+        ordered = order_points(pts)
+        # warp サイズ
+        width_top = float(np.linalg.norm(ordered[1] - ordered[0]))
+        width_bottom = float(np.linalg.norm(ordered[2] - ordered[3]))
+        max_width = max(int(max(width_top, width_bottom)), 300)
+        height_left = float(np.linalg.norm(ordered[3] - ordered[0]))
+        height_right = float(np.linalg.norm(ordered[2] - ordered[1]))
+        max_height = max(int(max(height_left, height_right)), 420)
+        dst = np.array(
+            [[0, 0], [max_width - 1, 0], [max_width - 1, max_height - 1], [0, max_height - 1]],
+            dtype=np.float32,
+        )
+        matrix = cv2.getPerspectiveTransform(ordered, dst)
+        card_image = cv2.warpPerspective(image, matrix, (max_width, max_height))
+        card_type_str = "standard" if (max_width / max_height) < 0.75 else "small"
+        # corners は echo back (手動値そのまま)
+        ordered_corners = ordered
+    else:
+        card_data = detect_card(image, trim=False)
+        card_image = card_data["card_image"]
+        card_type_str = card_data["card_type"]
+        ordered_corners = card_data.get("corners")
+        if ordered_corners is None:
+            fb = _fallback_full_image(image)
+            ordered_corners = fb["corners"]
+
+    # 補正後カード画像を長辺800pxに
     ch, cw = card_image.shape[:2]
     if max(ch, cw) > 800:
         scale = 800 / max(ch, cw)
         card_image = cv2.resize(card_image, (int(cw * scale), int(ch * scale)), interpolation=cv2.INTER_AREA)
 
-    # 正面化後画像のカード端 bbox (CenteringEditor の外枠初期値)
     outer_box = find_card_bbox_in_normalized(card_image)
 
-    # Base64エンコード
+    # 補正後 Base64
     _, buffer = cv2.imencode(".jpg", card_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
     card_b64 = base64.b64encode(buffer).decode("utf-8")
 
+    # original (resized 1200) も Base64 で返す。手動補正UIで再表示するため。
+    _, orig_buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    orig_b64 = base64.b64encode(orig_buf).decode("utf-8")
+
+    # corners を {tl,tr,br,bl: [x,y]} 形式に
+    pts = np.asarray(ordered_corners).astype(float)
+    corners_dict = {
+        "tl": [float(pts[0][0]), float(pts[0][1])],
+        "tr": [float(pts[1][0]), float(pts[1][1])],
+        "br": [float(pts[2][0]), float(pts[2][1])],
+        "bl": [float(pts[3][0]), float(pts[3][1])],
+    }
+
     return {
         "card_image": card_b64,
-        "card_type": card_data["card_type"],
+        "card_type": card_type_str,
         "outer_box": outer_box,
+        "original_image": orig_b64,
+        "original_corners": corners_dict,
+        "original_size": {"w": int(w), "h": int(h)},
     }
 
 

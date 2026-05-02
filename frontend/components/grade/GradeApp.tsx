@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { gradeCard, getBrands, preprocessImage, identifyCard, GradeResult, Brand, CardSummary, IdentifyCardResult } from "../../lib/api";
+import { gradeCard, getBrands, preprocessImage, identifyCard, GradeResult, Brand, CardSummary, IdentifyCardResult, CornerPoints } from "../../lib/api";
 import GradeResultView from "../result/GradeResultView";
 import CenteringEditor from "../centering/CenteringEditor";
+import PerspectiveEditor from "../centering/PerspectiveEditor";
 import CardNameAutocomplete from "../cards/CardNameAutocomplete";
 import CameraCapture from "../camera/CameraCapture";
 
@@ -17,6 +18,9 @@ export default function GradeApp() {
   const [manualCentering, setManualCentering] = useState<Record<string, unknown> | null>(null);
   const [correctedImage, setCorrectedImage] = useState<string | null>(null);
   const [outerBox, setOuterBox] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
+  const [originalImage, setOriginalImage] = useState<string | null>(null);
+  const [originalCorners, setOriginalCorners] = useState<CornerPoints | null>(null);
+  const [originalSize, setOriginalSize] = useState<{ w: number; h: number } | null>(null);
 
   // 裏面 (任意)
   const [backFile, setBackFile] = useState<File | null>(null);
@@ -24,6 +28,13 @@ export default function GradeApp() {
   const [backManualCentering, setBackManualCentering] = useState<Record<string, unknown> | null>(null);
   const [backCorrectedImage, setBackCorrectedImage] = useState<string | null>(null);
   const [backOuterBox, setBackOuterBox] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
+  const [backOriginalImage, setBackOriginalImage] = useState<string | null>(null);
+  const [backOriginalCorners, setBackOriginalCorners] = useState<CornerPoints | null>(null);
+  const [backOriginalSize, setBackOriginalSize] = useState<{ w: number; h: number } | null>(null);
+
+  // 4点傾き調整 UI 表示中か (front/back/null)
+  const [perspectiveTarget, setPerspectiveTarget] = useState<"front" | "back" | null>(null);
+  const [perspectiveLoading, setPerspectiveLoading] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +136,9 @@ export default function GradeApp() {
         preprocessImage(file).then((pre) => {
           setCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
           setOuterBox(pre.outer_box ?? null);
+          setOriginalImage(pre.original_image);
+          setOriginalCorners(pre.original_corners);
+          setOriginalSize(pre.original_size);
         }),
       ];
       if (backFile) {
@@ -132,6 +146,9 @@ export default function GradeApp() {
           preprocessImage(backFile).then((pre) => {
             setBackCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
             setBackOuterBox(pre.outer_box ?? null);
+            setBackOriginalImage(pre.original_image);
+            setBackOriginalCorners(pre.original_corners);
+            setBackOriginalSize(pre.original_size);
           })
         );
       }
@@ -141,6 +158,33 @@ export default function GradeApp() {
       setError(e instanceof Error ? e.message : "前処理に失敗しました");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 4点 corners 確定 → 再 preprocess → 補正画像を更新
+  const handlePerspectiveConfirm = async (corners: CornerPoints) => {
+    const target = perspectiveTarget;
+    if (!target) return;
+    const targetFile = target === "front" ? file : backFile;
+    if (!targetFile) return;
+    setPerspectiveLoading(true);
+    setError(null);
+    try {
+      const pre = await preprocessImage(targetFile, corners);
+      if (target === "front") {
+        setCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
+        setOuterBox(pre.outer_box ?? null);
+        setOriginalCorners(pre.original_corners);
+      } else {
+        setBackCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
+        setBackOuterBox(pre.outer_box ?? null);
+        setBackOriginalCorners(pre.original_corners);
+      }
+      setPerspectiveTarget(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "再正面化に失敗しました");
+    } finally {
+      setPerspectiveLoading(false);
     }
   };
 
@@ -158,6 +202,13 @@ export default function GradeApp() {
     setBackCorrectedImage(null);
     setOuterBox(null);
     setBackOuterBox(null);
+    setOriginalImage(null);
+    setOriginalCorners(null);
+    setOriginalSize(null);
+    setBackOriginalImage(null);
+    setBackOriginalCorners(null);
+    setBackOriginalSize(null);
+    setPerspectiveTarget(null);
     setSelectedCardId(null);
     setSelectedCardCode(null);
     setIdentifyResult(null);
@@ -262,23 +313,48 @@ export default function GradeApp() {
           >
             ← 戻る
           </button>
-          <div className="mb-3 flex items-center gap-2 text-xs">
-            <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
-              {backFile ? "1 / 2" : "1 / 1"}
-            </span>
-            <span className="font-medium text-gray-700">表面のセンタリング測定</span>
+          <div className="mb-3 flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+                {backFile ? "1 / 2" : "1 / 1"}
+              </span>
+              <span className="font-medium text-gray-700">表面のセンタリング測定</span>
+            </div>
+            {originalImage && originalCorners && originalSize && (
+              <button
+                type="button"
+                onClick={() => setPerspectiveTarget("front")}
+                className="px-2.5 py-1 rounded-full text-[11px] border border-blue-400 text-blue-700 bg-white hover:bg-blue-50 whitespace-nowrap"
+                title="斜め撮影や四隅検出ズレを手動で修正"
+              >
+                📐 傾き調整
+              </button>
+            )}
           </div>
-          <CenteringEditor
-            imageSrc={correctedImage || preview!}
-            onComplete={(r) => handleFrontCenteringComplete(r as unknown as Record<string, unknown>)}
-            onSkip={handleFrontSkipCentering}
-            fullartMode={(() => {
-              const r = currentBrand?.rarities.find((x) => x.id === selectedRarity);
-              return !!r && (!r.has_border || r.border_type === "none");
-            })()}
-            cardKind={selectedRarity === "l" ? "leader" : "character"}
-            initialOuter={outerBox}
-          />
+
+          {perspectiveTarget === "front" && originalImage && originalCorners && originalSize ? (
+            <PerspectiveEditor
+              originalImage={originalImage}
+              initialCorners={originalCorners}
+              originalSize={originalSize}
+              onCancel={() => setPerspectiveTarget(null)}
+              onConfirm={handlePerspectiveConfirm}
+              loading={perspectiveLoading}
+              title="表面の傾きを手動で調整"
+            />
+          ) : (
+            <CenteringEditor
+              imageSrc={correctedImage || preview!}
+              onComplete={(r) => handleFrontCenteringComplete(r as unknown as Record<string, unknown>)}
+              onSkip={handleFrontSkipCentering}
+              fullartMode={(() => {
+                const r = currentBrand?.rarities.find((x) => x.id === selectedRarity);
+                return !!r && (!r.has_border || r.border_type === "none");
+              })()}
+              cardKind={selectedRarity === "l" ? "leader" : "character"}
+              initialOuter={outerBox}
+            />
+          )}
           {error && (
             <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
               {error}
@@ -296,20 +372,44 @@ export default function GradeApp() {
           >
             ← 表面センタリングへ戻る
           </button>
-          <div className="mb-3 flex items-center gap-2 text-xs">
-            <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
-              2 / 2
-            </span>
-            <span className="font-medium text-gray-700">裏面のセンタリング測定</span>
+          <div className="mb-3 flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
+                2 / 2
+              </span>
+              <span className="font-medium text-gray-700">裏面のセンタリング測定</span>
+            </div>
+            {backOriginalImage && backOriginalCorners && backOriginalSize && (
+              <button
+                type="button"
+                onClick={() => setPerspectiveTarget("back")}
+                className="px-2.5 py-1 rounded-full text-[11px] border border-purple-400 text-purple-700 bg-white hover:bg-purple-50 whitespace-nowrap"
+              >
+                📐 傾き調整
+              </button>
+            )}
           </div>
-          <CenteringEditor
-            imageSrc={backCorrectedImage || backPreview!}
-            onComplete={(r) => handleBackCenteringComplete(r as unknown as Record<string, unknown>)}
-            onSkip={handleBackSkipCentering}
-            fullartMode={false}
-            cardKind="character"
-            initialOuter={backOuterBox}
-          />
+
+          {perspectiveTarget === "back" && backOriginalImage && backOriginalCorners && backOriginalSize ? (
+            <PerspectiveEditor
+              originalImage={backOriginalImage}
+              initialCorners={backOriginalCorners}
+              originalSize={backOriginalSize}
+              onCancel={() => setPerspectiveTarget(null)}
+              onConfirm={handlePerspectiveConfirm}
+              loading={perspectiveLoading}
+              title="裏面の傾きを手動で調整"
+            />
+          ) : (
+            <CenteringEditor
+              imageSrc={backCorrectedImage || backPreview!}
+              onComplete={(r) => handleBackCenteringComplete(r as unknown as Record<string, unknown>)}
+              onSkip={handleBackSkipCentering}
+              fullartMode={false}
+              cardKind="character"
+              initialOuter={backOuterBox}
+            />
+          )}
           {loading && (
             <div className="mt-4 text-center">
               <span className="animate-spin inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full" />

@@ -60,15 +60,31 @@ export async function getBrands(): Promise<Brand[]> {
   return res.json();
 }
 
+export interface CornerPoints {
+  tl: [number, number];
+  tr: [number, number];
+  br: [number, number];
+  bl: [number, number];
+}
+
 export interface PreprocessResult {
   card_image: string;
   card_type: string;
   outer_box?: { left: number; right: number; top: number; bottom: number };
+  original_image: string;
+  original_corners: CornerPoints;
+  original_size: { w: number; h: number };
 }
 
-export async function preprocessImage(frontImage: File): Promise<PreprocessResult> {
+export async function preprocessImage(
+  frontImage: File,
+  corners?: CornerPoints
+): Promise<PreprocessResult> {
   const formData = new FormData();
   formData.append("front_image", frontImage);
+  if (corners) {
+    formData.append("corners", JSON.stringify(corners));
+  }
 
   const res = await fetch(`${API_BASE}/api/v1/preprocess`, {
     method: "POST",
