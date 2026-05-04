@@ -31,6 +31,8 @@ export default function GradeApp() {
   const [backOriginalImage, setBackOriginalImage] = useState<string | null>(null);
   const [backOriginalCorners, setBackOriginalCorners] = useState<CornerPoints | null>(null);
   const [backOriginalSize, setBackOriginalSize] = useState<{ w: number; h: number } | null>(null);
+  // 裏面の手動正面化が確定した時だけセット。null なら raw 画像で測定する。
+  const [backWarpCorners, setBackWarpCorners] = useState<CornerPoints | null>(null);
 
   // 4点傾き調整 UI 表示中か (front/back/null)
   const [perspectiveTarget, setPerspectiveTarget] = useState<"front" | "back" | null>(null);
@@ -144,8 +146,12 @@ export default function GradeApp() {
       if (backFile) {
         tasks.push(
           preprocessImage(backFile).then((pre) => {
-            setBackCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
-            setBackOuterBox(pre.outer_box ?? null);
+            // 裏面はパターンが均一で auto-corner-detection が外しやすく、
+            // そのまま auto-warp すると画像が引き延ばされて表示されるため、
+            // 既定では warp を適用せず raw 原画像を表示。手動で「傾き調整」を
+            // 実行した時だけ正面化結果に切り替える。
+            setBackCorrectedImage(`data:image/jpeg;base64,${pre.original_image}`);
+            setBackOuterBox(null);
             setBackOriginalImage(pre.original_image);
             setBackOriginalCorners(pre.original_corners);
             setBackOriginalSize(pre.original_size);
@@ -179,6 +185,8 @@ export default function GradeApp() {
         setBackCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
         setBackOuterBox(pre.outer_box ?? null);
         setBackOriginalCorners(pre.original_corners);
+        // 手動で正面化が確定した → backend にも同じ corners で warp させる
+        setBackWarpCorners(corners);
       }
       setPerspectiveTarget(null);
     } catch (e) {
@@ -208,6 +216,7 @@ export default function GradeApp() {
     setBackOriginalImage(null);
     setBackOriginalCorners(null);
     setBackOriginalSize(null);
+    setBackWarpCorners(null);
     setPerspectiveTarget(null);
     setSelectedCardId(null);
     setSelectedCardCode(null);
@@ -269,16 +278,29 @@ export default function GradeApp() {
     }
   };
 
+  // 裏面の payload に warp_corners を merge して、backend と座標系を合わせる。
+  // backWarpCorners が null = raw 画像で測定 (backend も raw を使う)
+  // backWarpCorners が set = 手動 warp 済 (backend も同じ corners で warp する)
+  const mergeBackWarp = (
+    centering: Record<string, unknown> | null,
+  ): Record<string, unknown> | null => {
+    if (!backWarpCorners) return centering;
+    const base = centering ?? {};
+    return { ...base, warp_corners: backWarpCorners };
+  };
+
   // 裏面センタリング完了 → grade
   const handleBackCenteringComplete = async (centeringResult: Record<string, unknown>) => {
-    setBackManualCentering(centeringResult);
-    await submitGrade(manualCentering, centeringResult);
+    const payload = mergeBackWarp(centeringResult);
+    setBackManualCentering(payload);
+    await submitGrade(manualCentering, payload);
   };
 
   // 裏面センタリング自動 (スキップ)
   const handleBackSkipCentering = async () => {
-    setBackManualCentering(null);
-    await submitGrade(manualCentering, null);
+    const payload = mergeBackWarp(null);
+    setBackManualCentering(payload);
+    await submitGrade(manualCentering, payload);
   };
 
   const brandEmojis: Record<string, string> = {

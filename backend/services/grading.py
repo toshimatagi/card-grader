@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import cv2
 import numpy as np
 
-from .preprocessing import detect_card
+from .preprocessing import detect_card, order_points
 from .centering import analyze_centering
 from .surface import analyze_surface
 from .color import analyze_color
@@ -206,6 +206,14 @@ def _analyze_back_side(image_bytes: bytes,
     裏面画像のセンタリング測定。
     裏面は均一パターンのため surface/color/edges 分析は行わず、
     センタリング測定 (手動 or 自動) のみを実施する。
+
+    座標系の方針:
+      - 既定では裏面は auto-corner-detection が安定しないため正面化せず
+        raw 画像 (1200pxリサイズ後) で測定する。フロント側もこの raw 画像を
+        ユーザーに見せるため座標系が一致する。
+      - ユーザーが手動で4点を確定した場合のみ、フロントが
+        manual_centering.warp_corners に corners を載せて送ってくる。
+        この時はその corners で同じ warp をかけてから測定する。
     """
     nparr = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -214,12 +222,48 @@ def _analyze_back_side(image_bytes: bytes,
 
     image = _resize_if_needed(image, max_side=1200)
 
-    use_trim = not (manual_centering and "lr_ratio" in manual_centering)
-    card_data = detect_card(image, trim=use_trim)
-    card_image = card_data["card_image"]
+    warp_corners = (manual_centering or {}).get("warp_corners")
+    has_manual_lines = bool(manual_centering and "lr_ratio" in manual_centering)
+    card_image: np.ndarray
+    if has_manual_lines and warp_corners:
+        # 手動 warp 確定済 → フロントと同じ corners で正面化
+        try:
+            pts = np.array(
+                [
+                    warp_corners["tl"], warp_corners["tr"],
+                    warp_corners["br"], warp_corners["bl"],
+                ],
+                dtype=np.float32,
+            )
+            ordered = order_points(pts)
+            width_top = float(np.linalg.norm(ordered[1] - ordered[0]))
+            width_bottom = float(np.linalg.norm(ordered[2] - ordered[3]))
+            max_width = max(int(max(width_top, width_bottom)), 300)
+            height_left = float(np.linalg.norm(ordered[3] - ordered[0]))
+            height_right = float(np.linalg.norm(ordered[2] - ordered[1]))
+            max_height = max(int(max(height_left, height_right)), 420)
+            dst = np.array(
+                [[0, 0], [max_width - 1, 0],
+                 [max_width - 1, max_height - 1], [0, max_height - 1]],
+                dtype=np.float32,
+            )
+            matrix = cv2.getPerspectiveTransform(ordered, dst)
+            card_image = cv2.warpPerspective(image, matrix, (max_width, max_height))
+        except (KeyError, TypeError, ValueError, IndexError) as e:
+            print(f"[WARN] back warp_corners 適用失敗、raw を使用: {e}")
+            card_image = image
+    elif has_manual_lines:
+        # 手動センタリング (warp なし) → フロントは raw 画像でマークしているので raw を使う
+        # (裏面は auto-warp が暴れて画像が引き延ばされる事案があるため、
+        #  既定では auto-warp せずユーザーの目視座標と一致させる)
+        card_image = image
+    else:
+        # 自動センタリング (manual lines なし) → 従来通り auto-warp & trim
+        card_data = detect_card(image, trim=True)
+        card_image = card_data["card_image"]
     card_image = _resize_if_needed(card_image, max_side=800)
 
-    if manual_centering and "lr_ratio" in manual_centering:
+    if has_manual_lines:
         centering_result = _build_manual_centering_result(manual_centering, card_image)
     else:
         # 裏面は枠のあるカードでも均一なので borderless モードで測定
