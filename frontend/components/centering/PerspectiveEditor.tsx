@@ -108,14 +108,29 @@ export default function PerspectiveEditor({
     if (!activeCorner || !imgRect) return null;
     const ZOOM = 2.5;
     const SIZE = 110; // 拡大鏡の表示サイズ (CSS px)
+    const MARGIN = 4;
+    const FINGER_GAP = 70; // 指/カーソルから拡大鏡までの隙間
     const cornerImgPx = corners[activeCorner];
     const cornerDisp = toDisplay(cornerImgPx);
 
-    // 拡大鏡の表示位置: 指/マウス上方 100px、左右は端に近づけば反転
-    const offsetY = -120;
-    const offsetX = cornerDisp.x > imgRect.width / 2 ? -120 : 80;
-    const left = cornerDisp.x + offsetX;
-    const top = cornerDisp.y + offsetY;
+    // 縦方向: デフォルトは指の上方。上部 corner で枠外に出るなら指の下方に反転
+    let offsetY = -(SIZE + FINGER_GAP / 2);
+    if (cornerDisp.y + offsetY < MARGIN) {
+      offsetY = FINGER_GAP; // 指の少し下に表示
+    }
+    // 横方向: 左半分の corner なら右側、右半分なら左側
+    const offsetX =
+      cornerDisp.x > imgRect.width / 2 ? -(SIZE + FINGER_GAP / 2) : FINGER_GAP;
+
+    // 必ず画像枠内に収まるようクランプ (overflow-visible でも見やすい位置に)
+    const left = Math.max(
+      MARGIN,
+      Math.min(imgRect.width - SIZE - MARGIN, cornerDisp.x + offsetX)
+    );
+    const top = Math.max(
+      MARGIN,
+      Math.min(imgRect.height - SIZE - MARGIN, cornerDisp.y + offsetY)
+    );
 
     // 背景画像を拡大表示 (background-position で対象点が中心に来るように)
     const bgSize = `${imgRect.width * ZOOM}px ${imgRect.height * ZOOM}px`;
@@ -247,7 +262,7 @@ export default function PerspectiveEditor({
 
       <div
         ref={containerRef}
-        className="relative inline-block max-w-full bg-gray-100 rounded-lg overflow-hidden touch-none select-none"
+        className="relative inline-block max-w-full bg-gray-100 rounded-lg touch-none select-none"
         style={{ touchAction: "none" }}
       >
         <img
@@ -256,7 +271,7 @@ export default function PerspectiveEditor({
           alt="傾き調整用 元画像"
           onLoad={refreshImgRect}
           draggable={false}
-          className="block max-w-full h-auto"
+          className="block max-w-full h-auto rounded-lg"
           style={{ maxHeight: "70vh" }}
         />
         {imgRect && (
