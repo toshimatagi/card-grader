@@ -11,6 +11,15 @@ type Props = {
 const DEFAULT_ASPECT = 88 / 63;
 const FRAME_PADDING_RATIO = 0.06; // 画面端からの余白比
 
+// 自動スキャン
+const AUTO_ANALYZE_INTERVAL_MS = 167; // ~6Hz
+const AUTO_STABLE_MS = 700; // この時間連続で OK が続いたら自動撮影
+const AUTO_INITIAL_GRACE_MS = 800; // カメラ起動直後は自動撮影しない
+const AUTO_DS_WIDTH = 320; // 解析用ダウンサンプル幅 (px)
+const EDGE_PAD_DS = 3; // 枠端から内側/外側にずらすピクセル (DS座標)
+const EDGE_SAMPLES = 14; // 各辺のサンプル数
+const EDGE_CONTRAST_THRESHOLD = 18; // 0-255、内側-外側の平均輝度差
+
 export default function CameraCapture({
   onCapture,
   onClose,
@@ -18,6 +27,9 @@ export default function CameraCapture({
 }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const analyzeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [tilt, setTilt] = useState<{ pitch: number; roll: number } | null>(null);
@@ -25,6 +37,16 @@ export default function CameraCapture({
     "unknown" | "granted" | "denied" | "unsupported"
   >("unknown");
   const [capturing, setCapturing] = useState(false);
+  const [autoScan, setAutoScan] = useState(true);
+  const [aligned, setAligned] = useState(false);
+  const [countdown, setCountdown] = useState(0); // 0..1 (自動撮影までの進捗)
+  const readyAtRef = useRef<number | null>(null);
+  const stableSinceRef = useRef<number | null>(null);
+  // 解析ループ内で最新値を読むための ref
+  const tiltOkRef = useRef(false);
+  const capturingRef = useRef(false);
+  const autoScanRef = useRef(true);
+  const captureRef = useRef<(() => void) | null>(null);
 
   // カメラ起動
   useEffect(() => {
@@ -52,6 +74,7 @@ export default function CameraCapture({
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
           setReady(true);
+          readyAtRef.current = Date.now();
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -187,6 +210,122 @@ export default function CameraCapture({
     Math.abs(tilt.roll) <= TILT_THRESHOLD;
   const tiltActive = tilt != null;
 
+  // 解析ループから読むため refs を最新値に同期
+  useEffect(() => {
+    tiltOkRef.current = tiltOk;
+  }, [tiltOk]);
+  useEffect(() => {
+    capturingRef.current = capturing;
+  }, [capturing]);
+  useEffect(() => {
+    autoScanRef.current = autoScan;
+  }, [autoScan]);
+  useEffect(() => {
+    captureRef.current = capture;
+  }, [capture]);
+
+  // 自動スキャン: video から枠領域の4辺コントラストを定期解析し、
+  //   水平OK + 枠一致 が AUTO_STABLE_MS 連続で成立したら capture()
+  useEffect(() => {
+    if (!ready) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const run = () => {
+      if (stopped) return;
+      analyze();
+      timer = setTimeout(run, AUTO_ANALYZE_INTERVAL_MS);
+    };
+
+    const analyze = () => {
+      const video = videoRef.current;
+      const container = containerRef.current;
+      const frameDiv = frameRef.current;
+      if (!video || !container || !frameDiv) return;
+      const Vw = video.videoWidth;
+      const Vh = video.videoHeight;
+      if (!Vw || !Vh) return;
+
+      // object-cover で表示された video の container 内位置 → video pixel に逆変換
+      const cR = container.getBoundingClientRect();
+      const fR = frameDiv.getBoundingClientRect();
+      if (cR.width === 0 || cR.height === 0) return;
+      const scale = Math.max(cR.width / Vw, cR.height / Vh);
+      const offX = (cR.width - Vw * scale) / 2;
+      const offY = (cR.height - Vh * scale) / 2;
+      const fxV = (fR.left - cR.left - offX) / scale;
+      const fyV = (fR.top - cR.top - offY) / scale;
+      const fwV = fR.width / scale;
+      const fhV = fR.height / scale;
+
+      // ダウンサンプルして getImageData
+      const dsScale = AUTO_DS_WIDTH / Vw;
+      const DS_W = AUTO_DS_WIDTH;
+      const DS_H = Math.max(1, Math.round(Vh * dsScale));
+      let canvas = analyzeCanvasRef.current;
+      if (!canvas) {
+        canvas = document.createElement("canvas");
+        analyzeCanvasRef.current = canvas;
+      }
+      if (canvas.width !== DS_W || canvas.height !== DS_H) {
+        canvas.width = DS_W;
+        canvas.height = DS_H;
+      }
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return;
+      try {
+        ctx.drawImage(video, 0, 0, DS_W, DS_H);
+      } catch {
+        return;
+      }
+      let imgData: ImageData;
+      try {
+        imgData = ctx.getImageData(0, 0, DS_W, DS_H);
+      } catch {
+        return;
+      }
+
+      const fxDS = fxV * dsScale;
+      const fyDS = fyV * dsScale;
+      const fwDS = fwV * dsScale;
+      const fhDS = fhV * dsScale;
+
+      const isAligned = checkFrameAlignment(imgData, fxDS, fyDS, fwDS, fhDS);
+      setAligned(isAligned);
+
+      // 自動撮影タイマー
+      if (!autoScanRef.current || capturingRef.current) {
+        if (stableSinceRef.current != null) {
+          stableSinceRef.current = null;
+          setCountdown(0);
+        }
+        return;
+      }
+      const now = Date.now();
+      const sinceReady = readyAtRef.current ? now - readyAtRef.current : 0;
+      const ok = tiltOkRef.current && isAligned && sinceReady >= AUTO_INITIAL_GRACE_MS;
+      if (ok) {
+        if (stableSinceRef.current == null) stableSinceRef.current = now;
+        const elapsed = now - stableSinceRef.current;
+        setCountdown(Math.min(1, elapsed / AUTO_STABLE_MS));
+        if (elapsed >= AUTO_STABLE_MS) {
+          stableSinceRef.current = null;
+          setCountdown(0);
+          captureRef.current?.();
+        }
+      } else if (stableSinceRef.current != null) {
+        stableSinceRef.current = null;
+        setCountdown(0);
+      }
+    };
+
+    run();
+    return () => {
+      stopped = true;
+      if (timer != null) clearTimeout(timer);
+    };
+  }, [ready]);
+
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
       {/* ヘッダ */}
@@ -226,7 +365,10 @@ export default function CameraCapture({
       </div>
 
       {/* カメラビュー + オーバーレイ */}
-      <div className="relative flex-1 overflow-hidden bg-black">
+      <div
+        ref={containerRef}
+        className="relative flex-1 overflow-hidden bg-black"
+      >
         <video
           ref={videoRef}
           playsInline
@@ -239,6 +381,8 @@ export default function CameraCapture({
           cardAspect={cardAspect}
           tilt={tilt}
           tiltOk={tiltOk}
+          aligned={aligned}
+          frameRef={frameRef}
         />
 
         {!ready && !error && (
@@ -257,23 +401,81 @@ export default function CameraCapture({
 
       {/* フッタ: 撮影ボタン */}
       <div className="bg-black/80 py-6 flex items-center justify-center gap-6">
-        <div className="w-12" />
+        {/* 左: AUTO トグル */}
         <button
-          onClick={capture}
-          disabled={!ready || capturing}
-          className={`w-20 h-20 rounded-full border-4 transition-all ${
-            tiltOk
-              ? "border-green-400 bg-white hover:scale-105"
-              : "border-white bg-white hover:scale-105"
-          } ${
-            !ready || capturing ? "opacity-40 cursor-not-allowed" : ""
-          }`}
-          aria-label="撮影"
+          onClick={() => setAutoScan((v) => !v)}
+          disabled={!ready}
+          className={`w-14 h-14 rounded-full border text-[10px] font-bold leading-tight flex flex-col items-center justify-center transition-colors ${
+            autoScan
+              ? "border-green-400 bg-green-400/15 text-green-300"
+              : "border-white/40 bg-white/5 text-white/70"
+          } disabled:opacity-40`}
+          aria-label="自動スキャン"
+          aria-pressed={autoScan}
         >
-          <span className="block w-full h-full rounded-full bg-white" />
+          <span>AUTO</span>
+          <span className="text-[9px] opacity-80">{autoScan ? "ON" : "OFF"}</span>
         </button>
-        <div className="w-12 text-center text-white text-[10px] leading-tight">
-          {tiltOk ? "撮影OK" : tiltActive ? "傾き注意" : ""}
+
+        {/* 中央: 撮影ボタン (自動撮影カウントダウンリング付き) */}
+        <div className="relative w-24 h-24 flex items-center justify-center">
+          {autoScan && countdown > 0 && (
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              viewBox="0 0 100 100"
+            >
+              <circle
+                cx="50"
+                cy="50"
+                r="46"
+                fill="none"
+                stroke="rgb(74, 222, 128)"
+                strokeWidth="4"
+                strokeLinecap="round"
+                strokeDasharray={`${2 * Math.PI * 46}`}
+                strokeDashoffset={`${2 * Math.PI * 46 * (1 - countdown)}`}
+                transform="rotate(-90 50 50)"
+                style={{ transition: "stroke-dashoffset 100ms linear" }}
+              />
+            </svg>
+          )}
+          <button
+            onClick={capture}
+            disabled={!ready || capturing}
+            className={`w-20 h-20 rounded-full border-4 transition-all ${
+              autoScan && aligned && tiltOk
+                ? "border-green-400 bg-white scale-105"
+                : tiltOk
+                ? "border-green-400 bg-white hover:scale-105"
+                : "border-white bg-white hover:scale-105"
+            } ${
+              !ready || capturing ? "opacity-40 cursor-not-allowed" : ""
+            }`}
+            aria-label="撮影"
+          >
+            <span className="block w-full h-full rounded-full bg-white" />
+          </button>
+        </div>
+
+        {/* 右: ステータス文言 */}
+        <div className="w-14 text-center text-[10px] leading-tight">
+          {autoScan ? (
+            !tiltOk ? (
+              <span className="text-yellow-300">水平を整える</span>
+            ) : !aligned ? (
+              <span className="text-yellow-300">枠に合わせる</span>
+            ) : countdown > 0 ? (
+              <span className="text-green-300">自動撮影中…</span>
+            ) : (
+              <span className="text-green-300">準備OK</span>
+            )
+          ) : tiltOk ? (
+            <span className="text-green-300">撮影OK</span>
+          ) : tiltActive ? (
+            <span className="text-yellow-300">傾き注意</span>
+          ) : (
+            <span className="text-white/60">手動</span>
+          )}
         </div>
       </div>
     </div>
@@ -284,14 +486,23 @@ function FrameOverlay({
   cardAspect,
   tilt,
   tiltOk,
+  aligned,
+  frameRef,
 }: {
   cardAspect: number;
   tilt: { pitch: number; roll: number } | null;
   tiltOk: boolean;
+  aligned: boolean;
+  frameRef: React.MutableRefObject<HTMLDivElement | null>;
 }) {
   // SVG viewBox 100x100 で計算し、preserveAspectRatio で全画面に伸ばす方式は枠比が崩れる。
   // ここでは div + パーセンテージ + アスペクト比指定で枠を出す。
-  const frameColor = tiltOk ? "rgb(74, 222, 128)" : "rgb(255, 255, 255)";
+  const allOk = tiltOk && aligned;
+  const frameColor = allOk
+    ? "rgb(74, 222, 128)"
+    : aligned
+    ? "rgb(125, 211, 252)" // sky-300: 枠OKだが水平NG
+    : "rgb(255, 255, 255)";
 
   return (
     <div className="pointer-events-none absolute inset-0">
@@ -300,6 +511,7 @@ function FrameOverlay({
 
       {/* カード枠 */}
       <div
+        ref={frameRef}
         className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{
           width: `${(1 - FRAME_PADDING_RATIO * 2) * 100}%`,
@@ -403,4 +615,72 @@ function HorizonBubble({
       )}
     </div>
   );
+}
+
+// ガイド枠の4辺すべてで「内側 vs 外側」の輝度差が閾値超えなら、
+// カード端が枠端と一致していると判断する。
+// fx/fy/fw/fh はダウンサンプル後の枠領域 (DS座標)。
+function checkFrameAlignment(
+  imgData: ImageData,
+  fx: number,
+  fy: number,
+  fw: number,
+  fh: number
+): boolean {
+  const W = imgData.width;
+  const H = imgData.height;
+  const data = imgData.data;
+  // 枠が画面外まではみ出していたらNG扱い (端の処理が不安定なため)
+  if (
+    fx - EDGE_PAD_DS < 0 ||
+    fy - EDGE_PAD_DS < 0 ||
+    fx + fw + EDGE_PAD_DS >= W ||
+    fy + fh + EDGE_PAD_DS >= H ||
+    fw < 20 ||
+    fh < 20
+  ) {
+    return false;
+  }
+  const lum = (x: number, y: number): number => {
+    const xi = Math.max(0, Math.min(W - 1, Math.floor(x)));
+    const yi = Math.max(0, Math.min(H - 1, Math.floor(y)));
+    const i = (yi * W + xi) * 4;
+    return (data[i] + data[i + 1] + data[i + 2]) / 3;
+  };
+  const checkEdge = (
+    pointAt: (t: number) => { ix: number; iy: number; ox: number; oy: number }
+  ): boolean => {
+    let total = 0;
+    for (let i = 0; i < EDGE_SAMPLES; i++) {
+      const t = (i + 0.5) / EDGE_SAMPLES;
+      const { ix, iy, ox, oy } = pointAt(t);
+      total += Math.abs(lum(ix, iy) - lum(ox, oy));
+    }
+    return total / EDGE_SAMPLES >= EDGE_CONTRAST_THRESHOLD;
+  };
+  const top = checkEdge((t) => ({
+    ix: fx + fw * t,
+    iy: fy + EDGE_PAD_DS,
+    ox: fx + fw * t,
+    oy: fy - EDGE_PAD_DS,
+  }));
+  const bottom = checkEdge((t) => ({
+    ix: fx + fw * t,
+    iy: fy + fh - EDGE_PAD_DS,
+    ox: fx + fw * t,
+    oy: fy + fh + EDGE_PAD_DS,
+  }));
+  const left = checkEdge((t) => ({
+    ix: fx + EDGE_PAD_DS,
+    iy: fy + fh * t,
+    ox: fx - EDGE_PAD_DS,
+    oy: fy + fh * t,
+  }));
+  const right = checkEdge((t) => ({
+    ix: fx + fw - EDGE_PAD_DS,
+    iy: fy + fh * t,
+    ox: fx + fw + EDGE_PAD_DS,
+    oy: fy + fh * t,
+  }));
+  return top && bottom && left && right;
 }
