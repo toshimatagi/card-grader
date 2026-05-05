@@ -1,13 +1,20 @@
 """価格スナップショット汚染cleanup CLI
 
 ロジック:
-  各 source について `crawl_runs` の最新 `scope='all' AND status='success'` の
-  `started_at` を cutoff にする。各 (card_id, source) について、その source の
-  最新スナップショットが cutoff より前 → 「直近の全件クロールでこのカードを
-  source が listing しなかった」= delisted or 旧汚染 → 削除する。
+  各 (source, brand) ペアについて `crawl_runs` の最新
+  `scope='all' AND status='success'` の `started_at` を cutoff にする。
+  各 (card_id, source) について、その source の最新スナップショットが
+  対応する (source, card.brand) の cutoff より前 → 「直近の全件クロールで
+  この source × brand が listing しなかった」= delisted or 旧汚染 → 削除する。
 
-注意: src_max ベース (source 全体の最新時刻) を使うと、hot scope cron が
+注意1: src_max ベース (source 全体の最新時刻) を使うと、hot scope cron が
   src_max を進めて非hotセットを誤削除する。必ず scope='all' の cutoff を使う。
+
+注意2: source 単位の cutoff だと、同 source (例: fullahead) で複数 brand を
+  扱うとき後発 brand の started_at が先発 brand の cutoff を上書きして
+  誤削除を招く。必ず (source, brand) 単位で計算する。
+  (2026-05-05 に migration 007 で crawl_runs.brand を追加して対応。
+   brand=NULL の旧 row は 'onepiece' 互換として扱う)
 
 Usage:
   python -m backend.crawlers.cleanup           # dry-run
@@ -62,36 +69,46 @@ def run(execute: bool = False) -> int:
         return 2
 
     with httpx.Client() as client:
-        runs = _get(
-            client,
-            "crawl_runs",
-            "scope=eq.all&status=eq.success&select=source,started_at&order=started_at.desc&limit=200",
-        )
-        cutoff: dict[str, str] = {}
+        # crawl_runs から最新の (source, brand) 別 scope=all started_at を取る。
+        # migration 007 未適用の場合 brand 列が無いので select に含めず取得し
+        # NULL/未指定は 'onepiece' 互換として扱う (旧 row 保護)。
+        try:
+            runs = _get(
+                client,
+                "crawl_runs",
+                "scope=eq.all&status=eq.success&select=source,brand,started_at&order=started_at.desc&limit=400",
+            )
+        except httpx.HTTPStatusError:
+            # brand 列が無い (migration 未適用) → brand なしで取得
+            runs = _get(
+                client,
+                "crawl_runs",
+                "scope=eq.all&status=eq.success&select=source,started_at&order=started_at.desc&limit=400",
+            )
+
+        cutoff: dict[tuple[str, str], str] = {}
         for r in runs:
             src = r["source"]
-            if src not in cutoff:
-                cutoff[src] = r["started_at"]
+            brand = r.get("brand") or "onepiece"  # NULL は onepiece 互換
+            key = (src, brand)
+            if key not in cutoff:
+                cutoff[key] = r["started_at"]
         if not cutoff:
             print("[warn] no scope=all crawl_runs found", file=sys.stderr)
             return 1
 
-        print("Per-source cutoff (most recent scope=all start):")
-        for s, t in sorted(cutoff.items()):
-            print(f"  {s:10s} {t}")
+        print("Per-(source, brand) cutoff (most recent scope=all start):")
+        for (s, b), t in sorted(cutoff.items()):
+            print(f"  {s:10s} {b:10s} {t}")
 
-        # 当面 ONE PIECE カードのみ cleanup 対象とする。
-        # 同一 source (fullahead) で onepiece と pokemon の両 brand を抱えており、
-        # 現状の cleanup は (source) 単位で cutoff を取るため、両 brand の crawl が
-        # 別タイミングで走ると古い方が誤削除される。pokemon は当面 stale データを残す
-        # (ローンチ初期は影響軽微)。cleanup を (source, brand) 単位に拡張するまでの暫定。
+        # cards から id と brand を取る ((card_id, source) → cards.brand → cutoff判定)
         cards = []
         offset = 0
         while True:
             chunk = _get(
                 client,
                 "cards",
-                f"brand=eq.onepiece&select=id&order=id&limit=1000&offset={offset}",
+                f"select=id,brand&order=id&limit=1000&offset={offset}",
             )
             if not chunk:
                 break
@@ -99,7 +116,8 @@ def run(execute: bool = False) -> int:
             if len(chunk) < 1000:
                 break
             offset += 1000
-        ids = [c["id"] for c in cards]
+        id_to_brand: dict[str, str] = {c["id"]: c["brand"] for c in cards}
+        ids = list(id_to_brand.keys())
 
         snaps = []
         for i in range(0, len(ids), 100):
@@ -117,16 +135,25 @@ def run(execute: bool = False) -> int:
                 cs_max[k] = s["captured_at"]
 
         to_delete: list[tuple[str, str]] = []
+        skipped_no_cutoff = 0
         for (cid, src), latest in cs_max.items():
-            if src not in cutoff:
+            brand = id_to_brand.get(cid)
+            if not brand:
                 continue
-            if latest < cutoff[src]:
+            cut = cutoff.get((src, brand))
+            if cut is None:
+                # その (source, brand) で scope=all crawl が未到達 → 削除しない
+                skipped_no_cutoff += 1
+                continue
+            if latest < cut:
                 to_delete.append((cid, src))
 
         per_src: dict[str, int] = defaultdict(int)
         for _, s in to_delete:
             per_src[s] += 1
         print(f"\nStale (card_id, source) to delete: {len(to_delete)}")
+        if skipped_no_cutoff:
+            print(f"  (skipped {skipped_no_cutoff} pairs: no scope=all crawl yet for that (source, brand))")
         for s, n in sorted(per_src.items()):
             print(f"  {s:10s} {n}")
 

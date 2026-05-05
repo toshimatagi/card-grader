@@ -28,11 +28,10 @@ jobs:
             brand: onepiece
           - source: raftel
             brand: onepiece
-          # Pokemon (fullahead) は cleanup.py が source 単位で cutoff を取る制約のため
-          # daily からは外す。同 source に複数 brand があると、後発 brand の started_at が
-          # 先発 brand の cutoff を上書きして全スナップショット誤削除を誘発する。
-          # cleanup.py を (source, brand) 単位にしてから daily に戻す予定。
-          # 現状 hourly cron (scope=hot) のみで運用
+          # Pokemon: cleanup が migration 007 (crawl_runs.brand) 適用後は (source, brand) 単位で
+          # cutoff を計算するので、同 source の複数 brand 干渉は解消されている
+          - source: fullahead
+            brand: pokemon
     steps:
       - uses: actions/checkout@v4
 

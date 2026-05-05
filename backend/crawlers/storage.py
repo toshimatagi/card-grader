@@ -110,10 +110,29 @@ async def insert_snapshot(
     await client.post(url, headers=headers, json=payload, timeout=15)
 
 
-async def start_run(client: httpx.AsyncClient, source: str, scope: str) -> Optional[int]:
-    payload = {"source": source, "scope": scope, "status": "running"}
+async def start_run(
+    client: httpx.AsyncClient,
+    source: str,
+    scope: str,
+    brand: Optional[str] = None,
+) -> Optional[int]:
+    """crawl_runs に running 行を1件挿入し id を返す。
+
+    brand を渡すと crawl_runs.brand に保存される。migration 007 (brand列追加) が
+    未適用の Supabase でも動かせるよう、PostgREST が 'unknown column brand' で
+    400 を返したら brand なしで再試行する。
+    """
     url = f"{SUPABASE_URL}/rest/v1/crawl_runs"
-    resp = await client.post(url, headers=_headers(), json=payload, timeout=15)
+    payload: dict = {"source": source, "scope": scope, "status": "running"}
+    if brand:
+        payload["brand"] = brand
+        resp = await client.post(url, headers=_headers(), json=payload, timeout=15)
+        if resp.status_code == 400:
+            # migration 未適用の可能性。brand を抜いて再試行
+            payload.pop("brand", None)
+            resp = await client.post(url, headers=_headers(), json=payload, timeout=15)
+    else:
+        resp = await client.post(url, headers=_headers(), json=payload, timeout=15)
     if resp.status_code >= 400:
         return None
     rows = resp.json()

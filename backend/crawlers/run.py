@@ -100,7 +100,7 @@ async def run(
     run_id: int | None = None
     async with httpx.AsyncClient() as client:
         if not dry_run and os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_KEY"):
-            run_id = await start_run(client, source, scope)
+            run_id = await start_run(client, source, scope, brand)
 
         try:
             if not sets:
