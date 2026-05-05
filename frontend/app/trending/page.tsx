@@ -7,6 +7,11 @@ export const revalidate = 600; // 10分
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
 
+const BRANDS = [
+  { key: "onepiece", label: "ワンピ", short: "ワンピカード" },
+  { key: "pokemon", label: "ポケカ", short: "ポケモンカード" },
+] as const;
+
 const PERIODS = [
   { key: "24h", label: "24時間", hours: 24 },
   { key: "7d", label: "7日間", hours: 168 },
@@ -36,6 +41,7 @@ const VARIANT_LABEL: Record<string, string> = {
 };
 
 type SearchParams = {
+  brand?: string;
   period?: string;
   type?: string;
   sort?: string;
@@ -54,14 +60,15 @@ export async function generateMetadata({
   searchParams: Promise<SearchParams>;
 }): Promise<Metadata> {
   const sp = await searchParams;
+  const brand = BRANDS.find((b) => b.key === sp.brand) ?? BRANDS[0];
   const period = PERIODS.find((p) => p.key === sp.period) ?? PERIODS[1];
   const ptype = PRICE_TYPES.find((p) => p.key === sp.type) ?? PRICE_TYPES[0];
-  const title = `ワンピカード ${period.label}の値上がりランキング (${ptype.label})`;
-  const description = `ワンピースカードゲームの${period.label}で${ptype.label}が上昇したカードランキング。複数の取扱いサイトから集計した中央値ベース。`;
+  const title = `${brand.label}カード ${period.label}の値上がりランキング (${ptype.label})`;
+  const description = `${brand.short}の${period.label}で${ptype.label}が上昇したカードランキング。複数の取扱いサイトから集計した中央値ベース。`;
   return {
     title,
     description,
-    alternates: { canonical: `${SITE_URL}/trending?period=${period.key}&type=${ptype.key}` },
+    alternates: { canonical: `${SITE_URL}/trending?brand=${brand.key}&period=${period.key}&type=${ptype.key}` },
     openGraph: { title, description },
   };
 }
@@ -72,6 +79,7 @@ export default async function TrendingPage({
   searchParams: Promise<SearchParams>;
 }) {
   const sp = await searchParams;
+  const brand = BRANDS.find((b) => b.key === sp.brand) ?? BRANDS[0];
   const period = PERIODS.find((p) => p.key === sp.period) ?? PERIODS[1];
   const ptype = PRICE_TYPES.find((p) => p.key === sp.type) ?? PRICE_TYPES[0];
   const sort = SORTS.find((s) => s.key === sp.sort) ?? SORTS[0];
@@ -79,6 +87,7 @@ export default async function TrendingPage({
   const limit = (LIMITS as readonly number[]).includes(limitNum) ? limitNum : 50;
 
   const baseParams: Record<string, string> = {
+    brand: brand.key,
     period: period.key,
     type: ptype.key,
     sort: sort.key,
@@ -90,6 +99,7 @@ export default async function TrendingPage({
   try {
     // 上位の母集団を多めに取り、フロントで並び替えて表示
     items = await getTrending({
+      brand: brand.key,
       periodHours: period.hours,
       priceType: ptype.key,
       limit: Math.max(limit, 200),
@@ -113,8 +123,26 @@ export default async function TrendingPage({
     <div>
       <h1 className="text-2xl font-bold mb-2">値上がりランキング</h1>
       <p className="text-sm text-gray-600 mb-6">
-        指定期間で{ptype.label}の中央値が上昇したカードを表示。
+        指定期間で{ptype.label}の中央値が上昇した{brand.short}を表示。
       </p>
+
+      {/* ブランドタブ */}
+      <div className="flex gap-2 mb-3 flex-wrap">
+        {BRANDS.map((b) => (
+          <Link
+            key={b.key}
+            href={buildHref(baseParams, { brand: b.key })}
+            scroll={false}
+            className={`px-3 py-1.5 rounded-full text-sm border ${
+              b.key === brand.key
+                ? "bg-purple-600 text-white border-purple-600"
+                : "bg-white text-gray-700 border-gray-300 hover:border-gray-400"
+            }`}
+          >
+            {b.label}
+          </Link>
+        ))}
+      </div>
 
       {/* 期間タブ */}
       <div className="flex gap-2 mb-3 flex-wrap">

@@ -1,8 +1,11 @@
 """各サイトの表記を DB の canonical 形式に正規化する
 
-- set_code: 大文字3〜4文字 + 数字2〜3桁（例: OP15, ST30, EB04, PRB01, P）
+- set_code: ブランドにより形式が異なる
+  - ONE PIECE: OP15, ST30, EB04, PRB01, P
+  - Pokemon:   SV6, SV1V, SV8A, M2A, SM12A, S12A, BW9 等 (末尾アルファベット可)
 - card_no: 3桁ゼロ埋め
-- rarity: 'C'|'UC'|'R'|'SR'|'SEC'|'L'|'SP'|'P'
+- rarity (OP):    'C'|'UC'|'R'|'SR'|'SEC'|'L'|'SP'|'P'
+- rarity (pkm):   'C'|'U'|'R'|'RR'|'AR'|'SAR'|'SR'|'UR'|'CHR'|'CSR'|'S'|'K'|'PROMO'
 - variant: 'normal'|'parallel'|'super_parallel'|'manga'|'alt_art'|'other'
 """
 
@@ -10,24 +13,54 @@ from __future__ import annotations
 
 import re
 
-_TYPE_RE = re.compile(r"^([A-Z]+)(\d+)-(\d+)$")
+# 末尾アルファベット 1文字を許容 (SV1V, SV8a, M2a, SM12a 等)
+_TYPE_RE = re.compile(r"^([A-Z]+\d+[A-Z]?)-(\d+)$")
 
 
 def parse_card_code(code: str) -> tuple[str, str] | None:
-    """'OP15-007' → ('OP15', '007'), 'P-001' → ('P', '001')
+    """'OP15-007' → ('OP15', '007'), 'SV1V-001' → ('SV1V', '001'),
+    'M2a-061' → ('M2A', '061')
 
-    マッチしなければ None。
+    マッチしなければ None。プロモ (P-001 等) はマッチしない仕様 (扱いが複雑なため)。
     """
     code = code.strip().upper().replace(" ", "")
     m = _TYPE_RE.match(code)
     if not m:
         return None
-    prefix, num, card_no = m.groups()
-    set_code = f"{prefix}{num}"
+    set_code, card_no = m.groups()
     return set_code, card_no.zfill(3)
 
 
 _BASE_RARITIES = {"C", "UC", "R", "SR", "SEC", "L", "SP", "P"}
+
+# ポケモンカードのレアリティ集合 (拡張パック・ハイクラスパック・MEGA系をカバー)
+_PKM_RARITIES = {
+    "C", "U", "R",
+    "RR", "RRR",
+    "AR", "SAR", "SR",
+    "UR", "HR", "MR",
+    "MAR", "MSAR", "MSR", "MUR", "MHR",  # MEGAシリーズ系 (M*R = MEGA系レアリティ)
+    "CHR", "CSR",
+    "S", "K",
+    "ACE", "ACESPEC",
+    "PROMO", "PR",
+    "SP", "SSR",
+}
+
+
+def normalize_pokemon_rarity(label: str) -> tuple[str, str]:
+    """ポケカ用レアリティ正規化。
+    既知レアリティならそのまま、未知は ('OTHER', 'other')。
+
+    ポケカは ONE PIECE と異なり 'P-SR' 形式の parallel は無く、リバースホロや
+    ホロ仕様は同型番の別商品として扱われることが多い。variant は基本 'normal'。
+    """
+    key = label.strip().upper().replace(" ", "")
+    if not key:
+        return ("OTHER", "other")
+    if key in _PKM_RARITIES:
+        return (key, "normal")
+    return ("OTHER", "other")
 
 
 def normalize_yuyutei_rarity(label: str) -> tuple[str, str]:

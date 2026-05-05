@@ -7,6 +7,35 @@ export const dynamic = "force-dynamic";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
 
+type BrandMeta = {
+  name_ja: string;       // 'ワンピースカード'
+  name_short: string;    // 'ワンピカード'
+  en: string;            // schema.org Product brand
+  listPath: string;      // 価格DB一覧ページへのパス
+  listLabel: string;     // 価格DBラベル
+};
+
+const BRAND_META: Record<string, BrandMeta> = {
+  onepiece: {
+    name_ja: "ワンピースカード",
+    name_short: "ワンピカード",
+    en: "ONE PIECE Card Game",
+    listPath: "/cards",
+    listLabel: "ワンピカード価格DB",
+  },
+  pokemon: {
+    name_ja: "ポケモンカード",
+    name_short: "ポケカ",
+    en: "Pokemon Trading Card Game",
+    listPath: "/cards/pokemon",
+    listLabel: "ポケカ価格DB",
+  },
+};
+
+function getBrandMeta(brand: string | undefined): BrandMeta {
+  return BRAND_META[brand ?? "onepiece"] ?? BRAND_META.onepiece;
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -22,6 +51,7 @@ export async function generateMetadata({
   if (!data || data.cards.length === 0) return { title: `${code} - カードが見つかりません` };
 
   const first = data.cards[0];
+  const meta = getBrandMeta(first.brand);
   const codeUpper = data.code;
   const sellPrices = data.cards
     .map((c) => c.sell_price)
@@ -41,12 +71,12 @@ export async function generateMetadata({
       : minSell != null
         ? ` ¥${minSell.toLocaleString()}`
         : "";
-  const title = `${first.name_ja} ${codeUpper} 相場・買取価格${sellRange} | ワンピカード`;
+  const title = `${first.name_ja} ${codeUpper} 相場・買取価格${sellRange} | ${meta.name_short}`;
 
   // 動的 description: 販売中央値・買取最高値・バリアント数を含む
   const descParts: string[] = [];
   descParts.push(
-    `ワンピースカード「${first.name_ja}」(${codeUpper}) の最新相場と買取価格`
+    `${meta.name_ja}「${first.name_ja}」(${codeUpper}) の最新相場と買取価格`
   );
   if (variantCount > 1) {
     descParts.push(`${variantCount}バリアントを比較表示`);
@@ -118,6 +148,7 @@ export default async function CardDetailPage({
 
   const sellSeries = buildSeries(data.cards, "sell");
   const buySeries = buildSeries(data.cards, "buy");
+  const meta = getBrandMeta(data.cards[0]?.brand);
 
   // JSON-LD 構造化データ (Product schema)
   const productJsonLd = {
@@ -126,7 +157,7 @@ export default async function CardDetailPage({
     name: `${data.cards[0].name_ja} (${data.code})`,
     sku: data.code,
     image: data.cards.map((c) => c.image_url).filter(Boolean),
-    brand: { "@type": "Brand", name: "ONE PIECE Card Game" },
+    brand: { "@type": "Brand", name: meta.en },
     offers: data.cards
       .filter((c) => c.sell_price != null)
       .map((c) => ({
@@ -153,8 +184,8 @@ export default async function CardDetailPage({
       {
         "@type": "ListItem",
         position: 2,
-        name: "ワンピカード価格DB",
-        item: `${SITE_URL}/cards`,
+        name: meta.listLabel,
+        item: `${SITE_URL}${meta.listPath}`,
       },
       {
         "@type": "ListItem",
@@ -176,7 +207,7 @@ export default async function CardDetailPage({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
       <nav className="text-sm text-gray-500 mb-2">
-        <a href="/cards" className="hover:underline">価格DB</a>
+        <a href={meta.listPath} className="hover:underline">価格DB</a>
         <span className="mx-2">/</span>
         <span>{data.code}</span>
       </nav>
@@ -353,12 +384,12 @@ export default async function CardDetailPage({
       </section>
 
       {/* SEO本文セクション (G-3 動的生成テンプレ) */}
-      <CardDetailNotes cards={data.cards} cardCode={data.code} />
+      <CardDetailNotes cards={data.cards} cardCode={data.code} brandMeta={meta} />
     </div>
   );
 }
 
-function CardDetailNotes({ cards, cardCode }: { cards: CardVariant[]; cardCode: string }) {
+function CardDetailNotes({ cards, cardCode, brandMeta }: { cards: CardVariant[]; cardCode: string; brandMeta: BrandMeta }) {
   const sellPrices = cards
     .map((c) => c.sell_price)
     .filter((p): p is number => p != null && p > 0);
@@ -410,7 +441,7 @@ function CardDetailNotes({ cards, cardCode }: { cards: CardVariant[]; cardCode: 
       <div className="p-4 rounded-lg border bg-white">
         <h3 className="font-semibold text-sm mb-2">📊 相場の概要</h3>
         <p className="text-sm leading-relaxed text-gray-700">
-          ワンピースカード「{name}」({cardCode}) は
+          {brandMeta.name_ja}「{name}」({cardCode}) は
           {variantCount > 1
             ? `${variantCount}バリアントが流通しており、`
             : "現在、"}

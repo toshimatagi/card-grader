@@ -1,8 +1,9 @@
-"""カードラッシュ（cardrush-op.jp）スクレイパー - ONE PIECE専用サイト
+"""カードラッシュスクレイパー - ブランド別ドメイン構造
 
-対象ブランド: onepiece (opc)
-- トップ: https://www.cardrush-op.jp/
-- セット一覧: https://www.cardrush-op.jp/product-group/{gid}
+対象ブランド:
+- onepiece: https://www.cardrush-op.jp/
+- pokemon : https://www.cardrush-pokemon.jp/
+両ドメインとも同じEC-CUBEベースのCMSを使っているため共通実装。
 
 トップページのアンカーから set_code → gid のマップを動的に作る。
 同じ型番でも状態ランク（A-, A, B...）ごとに別商品になるため、
@@ -31,19 +32,25 @@ from .normalizer import (
     clean_card_name,
     clean_price,
     detect_variant_from_name,
+    normalize_pokemon_rarity,
     normalize_yuyutei_rarity,  # 遊々亭と同じ表記体系（P-SEC等）
     parse_card_code,
 )
 
-BASE = "https://www.cardrush-op.jp"
+# ブランド別の BASE URL (両サイトとも同じCMS構造を共有する想定)
+_BRAND_BASE = {
+    "onepiece": "https://www.cardrush-op.jp",
+    "pokemon": "https://www.cardrush-pokemon.jp",
+}
 
 _ALT_RE = re.compile(r"(?:〔状態([^〕]+)〕)?(.+?)【([^】]+)】\{([^}]+)\}")  # noqa: W605
 
 MAX_PAGES = 10  # 1ページ=100件、10ページ=1000件まで
 
 
-# トップのアンカーテキストから set_code を抽出: "【OP-15】" or "【ST-30】" or "【P】"
-_LABEL_SET_RE = re.compile(r"【([A-Z]+)[-]?(\d{0,2})】")
+# トップのアンカーテキストから set_code を抽出: "【OP-15】" or "【ST-30】" or "【SV-6N】" or "【M-4】"
+# 末尾アルファベット (V/N/S/L/a/b 等) も許容
+_LABEL_SET_RE = re.compile(r"【([A-Z]+)[-]?(\d{0,2})([A-Z]?)】")
 
 
 class CardrushScraper(BaseScraper):
@@ -52,15 +59,19 @@ class CardrushScraper(BaseScraper):
 
     def __init__(self) -> None:
         super().__init__()
+        # brand 別に gid マップを分離 (同一インスタンスを使い回す前提では無い)
         self._set_to_gid: dict[str, int] = {}
+        self._brand: str = ""
 
     # ------------------------------------------------------------------
     # set listing : トップページから set_code → gid を抽出
     # ------------------------------------------------------------------
     async def list_sets(self, brand: str) -> list[str]:
-        if brand != "onepiece":
+        base = _BRAND_BASE.get(brand)
+        if not base:
             return []
-        html = (await self.http.get(f"{BASE}/")).text
+        self._brand = brand
+        html = (await self.http.get(f"{base}/")).text
         soup = BeautifulSoup(html, "html.parser")
 
         mapping: dict[str, int] = {}
@@ -70,15 +81,16 @@ class CardrushScraper(BaseScraper):
                 continue
             gid = int(m_href.group(1))
             text = a.get_text(" ", strip=True)
-            # 例: 'ブースターパック 神の島の冒険【OP-15】', 'プレミアムブースター ...【PRB-02】'
+            # 例: 'ブースターパック 神の島の冒険【OP-15】', 'プレミアムブースター ...【PRB-02】',
+            #     'ナイトワンダラー【SV-6N】', 'MEGAドリームex【M-2A】'
             m = _LABEL_SET_RE.search(text)
             if not m:
                 continue
-            prefix, num = m.groups()
+            prefix, num, suffix = m.groups()
             if not num:
                 # 【P】等: プロモは扱いが複雑なのでスキップ
                 continue
-            set_code = f"{prefix}{num}"
+            set_code = f"{prefix}{num}{suffix}"
             # 最初に見つけたものを優先（"もっと見る"リンクは最後に出る）
             mapping.setdefault(set_code, gid)
 
@@ -89,9 +101,10 @@ class CardrushScraper(BaseScraper):
     # fetch set
     # ------------------------------------------------------------------
     async def fetch_set(self, brand: str, set_code: str) -> list[CrawledCard]:
-        if brand != "onepiece":
+        base = _BRAND_BASE.get(brand)
+        if not base:
             return []
-        if not self._set_to_gid:
+        if not self._set_to_gid or self._brand != brand:
             await self.list_sets(brand)
 
         gid = self._set_to_gid.get(set_code)
@@ -102,11 +115,13 @@ class CardrushScraper(BaseScraper):
         items: list[dict] = []
         seen_pids: set[str] = set()
         for page in range(1, MAX_PAGES + 1):
-            url = f"{BASE}/product-group/{gid}"
+            url = f"{base}/product-group/{gid}"
             if page > 1:
                 url = f"{url}?page={page}"
             try:
-                page_items = self._parse_list((await self.http.get(url)).text, set_url=url)
+                page_items = self._parse_list(
+                    (await self.http.get(url)).text, brand=brand, set_url=url
+                )
             except Exception:
                 break
             if not page_items:
@@ -134,22 +149,22 @@ class CardrushScraper(BaseScraper):
         for key, members in groups.items():
             # 価格がある中の最安を代表に
             in_stock = [m for m in members if m["price"] is not None]
-            base = min(in_stock, key=lambda m: m["price"]) if in_stock else members[0]
+            rep = min(in_stock, key=lambda m: m["price"]) if in_stock else members[0]
 
             cards.append(CrawledCard(
-                brand="onepiece",
+                brand=brand,
                 set_code=key[0],
                 card_no=key[1],
                 variant=key[2],
                 rarity=key[3],
-                name_ja=base["name_ja"],
+                name_ja=rep["name_ja"],
                 source=self.source,
-                source_card_id=str(base["product_id"]),
-                source_url=base["item_url"],
-                image_url=base["image_url"],
+                source_card_id=str(rep["product_id"]),
+                source_url=rep["item_url"],
+                image_url=rep["image_url"],
                 price_type="sell",
-                price=base["price"],
-                stock_status=base["stock_status"],
+                price=rep["price"],
+                stock_status=rep["stock_status"],
                 raw={
                     "conditions": [
                         {
@@ -167,16 +182,16 @@ class CardrushScraper(BaseScraper):
     # ------------------------------------------------------------------
     # parser
     # ------------------------------------------------------------------
-    def _parse_list(self, html: str, *, set_url: str) -> list[dict]:
+    def _parse_list(self, html: str, *, brand: str, set_url: str) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
         results: list[dict] = []
         for block in soup.select("div.item_data"):
-            parsed = self._parse_block(block)
+            parsed = self._parse_block(block, brand=brand)
             if parsed:
                 results.append(parsed)
         return results
 
-    def _parse_block(self, block) -> Optional[dict]:
+    def _parse_block(self, block, *, brand: str) -> Optional[dict]:
         pid = block.get("data-product-id")
         img = block.find("img")
         alt = (img.get("alt") if img else "") or ""
@@ -191,9 +206,14 @@ class CardrushScraper(BaseScraper):
             return None
         set_code, card_no = parsed_code
 
-        rarity, base_variant = normalize_yuyutei_rarity(raw_rarity)
-        variant = detect_variant_from_name(raw_name, base_variant)
-        name_ja = clean_card_name(raw_name)
+        if brand == "pokemon":
+            rarity, base_variant = normalize_pokemon_rarity(raw_rarity)
+            variant = base_variant
+            name_ja = raw_name.strip()
+        else:
+            rarity, base_variant = normalize_yuyutei_rarity(raw_rarity)
+            variant = detect_variant_from_name(raw_name, base_variant)
+            name_ja = clean_card_name(raw_name)
 
         figure = block.select_one("span.figure")
         price = clean_price(figure.get_text(strip=True)) if figure else None

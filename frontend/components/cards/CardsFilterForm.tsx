@@ -19,6 +19,7 @@ export function CardsFilterForm({
   initialRarity,
   initialQ,
   initialSort,
+  action = "/cards",
 }: {
   sets: SetOption[];
   rarities: string[];
@@ -26,6 +27,7 @@ export function CardsFilterForm({
   initialRarity: string;
   initialQ: string;
   initialSort: string;
+  action?: string;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -33,7 +35,7 @@ export function CardsFilterForm({
     <form
       ref={formRef}
       className="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-2"
-      action="/cards"
+      action={action}
       method="GET"
     >
       <select

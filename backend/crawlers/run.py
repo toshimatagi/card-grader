@@ -46,12 +46,31 @@ import re as _re
 _OP_RE = _re.compile(r"^OP\d+$")
 _EB_RE = _re.compile(r"^EB\d+$")
 
+# Pokemon: M シリーズ (2026年現役 MEGA) → SV シリーズ → 旧弾の優先順
+_PKM_M_RE = _re.compile(r"^M\d+[A-Z]?$")
+_PKM_SV_RE = _re.compile(r"^SV\d+[A-Z]?$")
 
-def _select_sets(all_sets: list[str], scope: str) -> list[str]:
+
+def _select_sets(all_sets: list[str], scope: str, brand: str = "onepiece") -> list[str]:
     if not all_sets:
         return []
     if scope == "all":
         return all_sets
+
+    if brand == "pokemon":
+        m_sets = sorted([s for s in all_sets if _PKM_M_RE.match(s)])
+        sv_sets = sorted([s for s in all_sets if _PKM_SV_RE.match(s)])
+        if scope == "hot":
+            # 現役 MEGA 最新2弾を優先。M弾が無ければ SV 最新2弾
+            return m_sets[-2:] if m_sets else sv_sets[-2:]
+        if scope == "warm":
+            warm_m = m_sets[:-2] if len(m_sets) >= 2 else []
+            return warm_m + sv_sets
+        if scope == "cold":
+            return [s for s in all_sets if not (_PKM_M_RE.match(s) or _PKM_SV_RE.match(s))]
+        return all_sets
+
+    # ONE PIECE (既存)
     op_sets = sorted([s for s in all_sets if _OP_RE.match(s)])
     if scope == "hot":
         return op_sets[-2:]  # 最新2つの通常ブースター
@@ -85,8 +104,8 @@ async def run(
 
         try:
             if not sets:
-                sets = _select_sets(await scraper.list_sets(brand), scope)
-                print(f"[info] resolved sets ({scope}): {sets}")
+                sets = _select_sets(await scraper.list_sets(brand), scope, brand)
+                print(f"[info] resolved sets ({scope}, brand={brand}): {sets}")
 
             for set_code in sets:
                 started = datetime.now(timezone.utc).isoformat()
