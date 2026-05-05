@@ -37,7 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run crawlers (yuyutei + cardrush, onepiece)
+      - name: Run crawlers (onepiece + pokemon)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -55,8 +55,11 @@ jobs:
             fi
           }
           ARGS=$(build_args)
+          # ONE PIECE
           python -m backend.crawlers.run --source cardrush  --brand onepiece $ARGS || true
           python -m backend.crawlers.run --source tierone   --brand onepiece $ARGS || true
           python -m backend.crawlers.run --source fullahead --brand onepiece $ARGS || true
           python -m backend.crawlers.run --source toretoku  --brand onepiece $ARGS || true
           python -m backend.crawlers.run --source raftel    --brand onepiece $ARGS || true
+          # Pokemon (cardrush-pokemon は Cloudflare Bot Fight で不可、yuyutei は Action IP で 403)
+          python -m backend.crawlers.run --source fullahead --brand pokemon  $ARGS || true

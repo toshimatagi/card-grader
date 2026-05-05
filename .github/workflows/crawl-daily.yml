@@ -17,7 +17,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        source: [cardrush, tierone, fullahead, toretoku, raftel]
+        include:
+          - source: cardrush
+            brand: onepiece
+          - source: tierone
+            brand: onepiece
+          - source: fullahead
+            brand: onepiece
+          - source: toretoku
+            brand: onepiece
+          - source: raftel
+            brand: onepiece
+          # Pokemon (fullahead) は cleanup.py が source 単位で cutoff を取る制約のため
+          # daily からは外す。同 source に複数 brand があると、後発 brand の started_at が
+          # 先発 brand の cutoff を上書きして全スナップショット誤削除を誘発する。
+          # cleanup.py を (source, brand) 単位にしてから daily に戻す予定。
+          # 現状 hourly cron (scope=hot) のみで運用
     steps:
       - uses: actions/checkout@v4
 
@@ -32,14 +47,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run crawler (${{ matrix.source }}, all sets)
+      - name: Run crawler (${{ matrix.source }} / ${{ matrix.brand }}, all sets)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           python -m backend.crawlers.run \
             --source ${{ matrix.source }} \
-            --brand onepiece \
+            --brand ${{ matrix.brand }} \
             --scope all
 
   cleanup:

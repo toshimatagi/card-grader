@@ -80,13 +80,18 @@ def run(execute: bool = False) -> int:
         for s, t in sorted(cutoff.items()):
             print(f"  {s:10s} {t}")
 
+        # 当面 ONE PIECE カードのみ cleanup 対象とする。
+        # 同一 source (fullahead) で onepiece と pokemon の両 brand を抱えており、
+        # 現状の cleanup は (source) 単位で cutoff を取るため、両 brand の crawl が
+        # 別タイミングで走ると古い方が誤削除される。pokemon は当面 stale データを残す
+        # (ローンチ初期は影響軽微)。cleanup を (source, brand) 単位に拡張するまでの暫定。
         cards = []
         offset = 0
         while True:
             chunk = _get(
                 client,
                 "cards",
-                f"select=id&order=id&limit=1000&offset={offset}",
+                f"brand=eq.onepiece&select=id&order=id&limit=1000&offset={offset}",
             )
             if not chunk:
                 break
