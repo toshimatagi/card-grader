@@ -8,7 +8,8 @@ export const revalidate = 86400; // 24h
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticEntries: MetadataRoute.Sitemap = [
     { url: SITE_URL, changeFrequency: "weekly", priority: 1.0 },
-    { url: `${SITE_URL}/cards`, changeFrequency: "daily", priority: 0.9 },
+    { url: `${SITE_URL}/cards`, changeFrequency: "daily", priority: 0.95 },
+    { url: `${SITE_URL}/cards/onepiece`, changeFrequency: "daily", priority: 0.9 },
     { url: `${SITE_URL}/cards/pokemon`, changeFrequency: "daily", priority: 0.9 },
     { url: `${SITE_URL}/trending`, changeFrequency: "hourly", priority: 0.9 },
     { url: `${SITE_URL}/trending?brand=pokemon`, changeFrequency: "hourly", priority: 0.8 },

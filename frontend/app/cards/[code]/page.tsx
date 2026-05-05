@@ -20,7 +20,7 @@ const BRAND_META: Record<string, BrandMeta> = {
     name_ja: "ワンピースカード",
     name_short: "ワンピカード",
     en: "ONE PIECE Card Game",
-    listPath: "/cards",
+    listPath: "/cards/onepiece",
     listLabel: "ワンピカード価格DB",
   },
   pokemon: {

@@ -70,10 +70,13 @@ export default function RootLayout({
                 鑑定
               </a>
               <a href="/cards" className="hover:text-blue-400 transition-colors">
-                ワンピDB
+                価格DB
               </a>
-              <a href="/cards/pokemon" className="hover:text-blue-400 transition-colors">
-                ポケカDB
+              <a href="/cards/onepiece" className="hover:text-blue-400 transition-colors hidden md:inline">
+                ワンピ
+              </a>
+              <a href="/cards/pokemon" className="hover:text-blue-400 transition-colors hidden md:inline">
+                ポケカ
               </a>
               <a href="/trending" className="hover:text-blue-400 transition-colors">
                 値上がり
