@@ -65,19 +65,30 @@ export default function RootLayout({
                 ワンピ・ポケカ価格DB & 鑑定
               </span>
             </a>
-            <div className="flex gap-5 text-sm">
+            <div className="flex gap-5 text-sm items-center">
               <a href="/" className="hover:text-blue-400 transition-colors">
                 鑑定
               </a>
-              <a href="/cards" className="hover:text-blue-400 transition-colors">
-                価格DB
-              </a>
-              <a href="/cards/onepiece" className="hover:text-blue-400 transition-colors hidden md:inline">
-                ワンピ
-              </a>
-              <a href="/cards/pokemon" className="hover:text-blue-400 transition-colors hidden md:inline">
-                ポケカ
-              </a>
+              <details className="relative group [&_summary::-webkit-details-marker]:hidden">
+                <summary className="cursor-pointer hover:text-blue-400 transition-colors list-none flex items-center gap-1">
+                  価格DB
+                  <span className="text-[10px] text-gray-400 group-open:rotate-180 transition-transform">▾</span>
+                </summary>
+                <div className="absolute left-0 mt-2 w-44 rounded-md bg-gray-800 border border-gray-700 shadow-lg z-50 py-1">
+                  <a href="/cards" className="block px-3 py-2 text-sm hover:bg-gray-700">
+                    <div>すべて見る</div>
+                    <div className="text-[10px] text-gray-400">ワンピ・ポケカ概要</div>
+                  </a>
+                  <a href="/cards/onepiece" className="block px-3 py-2 text-sm hover:bg-gray-700">
+                    <div>ワンピカード</div>
+                    <div className="text-[10px] text-gray-400">OP / ST / EB / PRB</div>
+                  </a>
+                  <a href="/cards/pokemon" className="block px-3 py-2 text-sm hover:bg-gray-700">
+                    <div>ポケモンカード</div>
+                    <div className="text-[10px] text-gray-400">M / SV / SM / S</div>
+                  </a>
+                </div>
+              </details>
               <a href="/trending" className="hover:text-blue-400 transition-colors">
                 値上がり
               </a>

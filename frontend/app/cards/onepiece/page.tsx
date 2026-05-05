@@ -112,6 +112,11 @@ export default async function OnePieceCardsPage({
 
   return (
     <div>
+      <nav className="text-xs text-gray-500 mb-2">
+        <Link href="/cards" className="hover:underline">価格DB</Link>
+        <span className="mx-1.5">/</span>
+        <span>ワンピカード</span>
+      </nav>
       <h1 className="text-2xl font-bold mb-2">ONE PIECE カード価格DB</h1>
       <p className="text-sm text-gray-600 mb-6">
         各型番のバリアント別価格推移を閲覧できます。表示価格は複数サイトから集計した中央値。

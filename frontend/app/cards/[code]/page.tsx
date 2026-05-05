@@ -170,7 +170,7 @@ export default async function CardDetailPage({
       })),
   };
 
-  // BreadcrumbList JSON-LD
+  // BreadcrumbList JSON-LD (4階層: ホーム > 価格DB > {ブランド}DB > 個別カード)
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
@@ -184,12 +184,18 @@ export default async function CardDetailPage({
       {
         "@type": "ListItem",
         position: 2,
+        name: "価格DB",
+        item: `${SITE_URL}/cards`,
+      },
+      {
+        "@type": "ListItem",
+        position: 3,
         name: meta.listLabel,
         item: `${SITE_URL}${meta.listPath}`,
       },
       {
         "@type": "ListItem",
-        position: 3,
+        position: 4,
         name: `${data.cards[0].name_ja} (${data.code})`,
         item: `${SITE_URL}/cards/${data.code}`,
       },
@@ -206,9 +212,11 @@ export default async function CardDetailPage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
-      <nav className="text-sm text-gray-500 mb-2">
-        <a href={meta.listPath} className="hover:underline">価格DB</a>
-        <span className="mx-2">/</span>
+      <nav className="text-xs text-gray-500 mb-2">
+        <a href="/cards" className="hover:underline">価格DB</a>
+        <span className="mx-1.5">/</span>
+        <a href={meta.listPath} className="hover:underline">{meta.name_short}</a>
+        <span className="mx-1.5">/</span>
         <span>{data.code}</span>
       </nav>
 
