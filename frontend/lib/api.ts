@@ -351,6 +351,7 @@ function cleanImageUrl(url: string | null | undefined): string | null {
 
 export interface TrendingCard {
   card_id: string;
+  brand: string;
   set_code: string;
   card_no: string;
   variant: string;
@@ -368,13 +369,15 @@ export async function getTrending(params: {
   priceType?: "sell" | "buy";
   limit?: number;
 }): Promise<TrendingCard[]> {
+  const brand = params.brand ?? "onepiece";
   const items = await sbRpc<TrendingCard[]>("trending_cards", {
-    p_brand: params.brand ?? "onepiece",
+    p_brand: brand,
     p_period_hours: params.periodHours,
     p_price_type: params.priceType ?? "sell",
     p_limit: params.limit ?? 50,
   });
-  return items.map((c) => ({ ...c, image_url: cleanImageUrl(c.image_url) }));
+  // RPC が brand を返さないので呼び出し元のbrandを attach (フロント表示用)
+  return items.map((c) => ({ ...c, brand, image_url: cleanImageUrl(c.image_url) }));
 }
 
 export async function searchCards(params: {

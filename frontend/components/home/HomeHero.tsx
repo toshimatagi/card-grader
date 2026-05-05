@@ -1,30 +1,43 @@
 import Link from "next/link";
-import { getTrending } from "../../lib/api";
+import { getTrending, type TrendingCard } from "../../lib/api";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 
-type Stats = { cardCount: number; latestSnapshot: string | null };
+type Stats = {
+  cardCount: number;
+  opCount: number;
+  pkmCount: number;
+  latestSnapshot: string | null;
+};
+
+async function countCards(brand: string, headers: HeadersInit): Promise<number> {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/cards?brand=eq.${brand}&select=id`,
+      { method: "HEAD", headers, next: { revalidate: 600 } }
+    );
+    const range = res.headers.get("Content-Range");
+    return range ? parseInt(range.split("/")[1], 10) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
 
 async function getStats(): Promise<Stats> {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return { cardCount: 0, latestSnapshot: null };
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    return { cardCount: 0, opCount: 0, pkmCount: 0, latestSnapshot: null };
+  }
   const headers: HeadersInit = {
     apikey: SUPABASE_KEY,
     Authorization: `Bearer ${SUPABASE_KEY}`,
     Prefer: "count=exact",
   };
 
-  let cardCount = 0;
-  try {
-    const cardsRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/cards?brand=eq.onepiece&select=id`,
-      { method: "HEAD", headers, next: { revalidate: 600 } }
-    );
-    const range = cardsRes.headers.get("Content-Range");
-    if (range) cardCount = parseInt(range.split("/")[1], 10) || 0;
-  } catch {
-    /* noop */
-  }
+  const [opCount, pkmCount] = await Promise.all([
+    countCards("onepiece", headers),
+    countCards("pokemon", headers),
+  ]);
 
   let latestSnapshot: string | null = null;
   try {
@@ -40,7 +53,12 @@ async function getStats(): Promise<Stats> {
     /* noop */
   }
 
-  return { cardCount, latestSnapshot };
+  return {
+    cardCount: opCount + pkmCount,
+    opCount,
+    pkmCount,
+    latestSnapshot,
+  };
 }
 
 function relativeTime(iso: string | null): string {
@@ -56,18 +74,35 @@ function relativeTime(iso: string | null): string {
   return `${diffD}日前`;
 }
 
+const BRAND_BADGE: Record<string, { label: string; cls: string }> = {
+  onepiece: { label: "ワンピ", cls: "bg-red-100 text-red-700 border-red-200" },
+  pokemon: { label: "ポケカ", cls: "bg-yellow-100 text-yellow-800 border-yellow-300" },
+};
+
 export default async function HomeHero() {
-  const [stats, trending] = await Promise.all([
-    getStats().catch(() => ({ cardCount: 0, latestSnapshot: null }) as Stats),
-    getTrending({ periodHours: 168, priceType: "sell", limit: 3 }).catch(() => []),
+  const [stats, opTrending, pkmTrending] = await Promise.all([
+    getStats().catch(
+      () => ({ cardCount: 0, opCount: 0, pkmCount: 0, latestSnapshot: null }) as Stats
+    ),
+    getTrending({ brand: "onepiece", periodHours: 168, priceType: "sell", limit: 5 }).catch(
+      () => [] as TrendingCard[]
+    ),
+    getTrending({ brand: "pokemon", periodHours: 168, priceType: "sell", limit: 5 }).catch(
+      () => [] as TrendingCard[]
+    ),
   ]);
+
+  // 両ブランド合算で上昇率順 top 3
+  const trending = [...opTrending, ...pkmTrending]
+    .sort((a, b) => b.pct_change - a.pct_change)
+    .slice(0, 3);
 
   return (
     <div className="mb-8">
       {/* ヒーロー */}
       <div className="text-center py-8 px-4 bg-gradient-to-br from-gray-900 via-gray-800 to-blue-900 text-white rounded-xl mb-6 shadow-lg">
         <h1 className="text-2xl sm:text-3xl font-bold mb-2 leading-tight">
-          ワンピカードの<span className="text-yellow-300">型番・相場・値上がり</span>を
+          ワンピカード・ポケカの<span className="text-yellow-300">型番・相場・値上がり</span>を
           <br className="hidden sm:block" />
           まとめてチェック
         </h1>
@@ -80,6 +115,11 @@ export default async function HomeHero() {
           {stats.cardCount > 0 && (
             <span className="px-3 py-1.5 bg-white/10 backdrop-blur rounded-full border border-white/10">
               🃏 <span className="font-bold">{stats.cardCount.toLocaleString()}</span> 枚収録
+              {stats.opCount > 0 && stats.pkmCount > 0 && (
+                <span className="text-gray-300 font-normal ml-1">
+                  (ワンピ {stats.opCount.toLocaleString()} / ポケカ {stats.pkmCount.toLocaleString()})
+                </span>
+              )}
             </span>
           )}
           {stats.latestSnapshot && (
@@ -88,6 +128,9 @@ export default async function HomeHero() {
               <span className="font-bold">{relativeTime(stats.latestSnapshot)}</span>
             </span>
           )}
+          <span className="px-3 py-1.5 bg-white/10 backdrop-blur rounded-full border border-white/10">
+            🎴 ワンピ・ポケカ対応
+          </span>
           <span className="px-3 py-1.5 bg-white/10 backdrop-blur rounded-full border border-white/10">
             🆓 完全無料
           </span>
@@ -98,7 +141,7 @@ export default async function HomeHero() {
             href="#grade"
             className="inline-block px-5 py-2 bg-yellow-400 text-gray-900 font-bold rounded-full text-sm hover:bg-yellow-300 transition-colors"
           >
-            📸 カードをチェック
+            📸 カードを鑑定
           </a>
           <a
             href="/cards"
@@ -115,13 +158,13 @@ export default async function HomeHero() {
         </div>
       </div>
 
-      {/* 値上がり Top 3 */}
+      {/* 値上がり Top 3 (両ブランド合算) */}
       {trending.length > 0 && (
         <section className="mb-2">
           <div className="flex items-end justify-between mb-3">
             <h2 className="text-lg font-bold">
               📈 今週の値上がり Top3{" "}
-              <span className="text-xs text-gray-500 font-normal">(7日間)</span>
+              <span className="text-xs text-gray-500 font-normal">(7日間 / 両ブランド)</span>
             </h2>
             <Link href="/trending" className="text-sm text-blue-600 hover:underline">
               全ランキング →
@@ -131,6 +174,7 @@ export default async function HomeHero() {
             {trending.map((c, i) => {
               const code = `${c.set_code}-${c.card_no}`;
               const up = c.pct_change >= 0;
+              const badge = BRAND_BADGE[c.brand] ?? null;
               return (
                 <Link
                   key={c.card_id}
@@ -153,6 +197,13 @@ export default async function HomeHero() {
                     <span className="absolute top-1 left-1 w-6 h-6 rounded-full bg-yellow-400 text-gray-900 text-xs font-bold flex items-center justify-center shadow">
                       {i + 1}
                     </span>
+                    {badge && (
+                      <span
+                        className={`absolute top-1 right-1 px-1.5 py-0.5 rounded text-[10px] font-bold border ${badge.cls}`}
+                      >
+                        {badge.label}
+                      </span>
+                    )}
                   </div>
                   <div className="mt-2">
                     <div className="text-[10px] text-gray-500">{code}</div>
