@@ -8,7 +8,11 @@ import {
   type CardSummaryWithPrice,
 } from "../../../lib/api";
 import { CardsFilterForm } from "../../../components/cards/CardsFilterForm";
-import { formatPokemonSetLabel, getPokemonSetMeta } from "../../../lib/pokemonSets";
+import {
+  POKEMON_SETS,
+  formatPokemonSetLabel,
+  getPokemonSetMeta,
+} from "../../../lib/pokemonSets";
 
 export const dynamic = "force-dynamic";
 
@@ -137,34 +141,44 @@ export default async function PokemonCardsPage({
         )}
       />
 
-      {/* セット (弾) の見出しチップ */}
-      {sets.sets.length > 0 && (
-        <div className="mb-4">
-          <div className="text-xs text-gray-500 mb-1.5">対応弾</div>
-          <div className="flex flex-wrap gap-1.5">
-            {[...sets.sets]
-              .sort((a, b) => b.set_code.localeCompare(a.set_code))
-              .map((s) => {
-                const meta = getPokemonSetMeta(s.set_code);
-                return (
-                  <a
-                    key={s.set_code}
-                    href={`/cards/pokemon?set=${s.set_code}`}
-                    className={`text-xs px-2 py-1 rounded border bg-white hover:bg-yellow-50 ${
-                      sp.set === s.set_code
-                        ? "border-yellow-500 ring-1 ring-yellow-300"
-                        : "border-yellow-300"
-                    } text-yellow-900`}
-                  >
-                    <span className="font-mono">{s.set_code}</span>
-                    {meta && <span className="ml-1">{meta.name}</span>}
-                    <span className="text-gray-400 ml-1">({s.count})</span>
-                  </a>
-                );
-              })}
-          </div>
+      {/* セット (弾) の見出しチップ — メタの全弾を表示しSEO内部リンクを増やす */}
+      <div className="mb-4">
+        <div className="text-xs text-gray-500 mb-1.5">対応弾</div>
+        <div className="flex flex-wrap gap-1.5">
+          {(() => {
+            const dataCounts = Object.fromEntries(
+              sets.sets.map((s) => [s.set_code, s.count]),
+            );
+            const allCodes = Array.from(
+              new Set([
+                ...sets.sets.map((s) => s.set_code),
+                ...Object.keys(POKEMON_SETS),
+              ]),
+            ).sort((a, b) => b.localeCompare(a));
+            return allCodes.map((code) => {
+              const meta = getPokemonSetMeta(code);
+              const cnt = dataCounts[code] ?? 0;
+              return (
+                <Link
+                  key={code}
+                  href={`/cards/pokemon/${code}`}
+                  className={`text-xs px-2 py-1 rounded border bg-white hover:bg-yellow-50 ${
+                    sp.set === code
+                      ? "border-yellow-500 ring-1 ring-yellow-300"
+                      : "border-yellow-300"
+                  } text-yellow-900`}
+                >
+                  <span className="font-mono">{code}</span>
+                  {meta && <span className="ml-1">{meta.name}</span>}
+                  <span className="text-gray-400 ml-1">
+                    ({cnt > 0 ? cnt : "予定"})
+                  </span>
+                </Link>
+              );
+            });
+          })()}
         </div>
-      )}
+      </div>
 
       {groups.length === 0 ? (
         <p className="text-gray-500">

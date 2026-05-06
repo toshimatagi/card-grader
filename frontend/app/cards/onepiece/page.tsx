@@ -8,6 +8,11 @@ import {
   type CardSummaryWithPrice,
 } from "../../../lib/api";
 import { CardsFilterForm } from "../../../components/cards/CardsFilterForm";
+import {
+  ONEPIECE_SETS,
+  getOnePieceSetMeta,
+  formatOnePieceSetLabel,
+} from "../../../lib/onepieceSets";
 
 export const dynamic = "force-dynamic";
 
@@ -130,7 +135,49 @@ export default async function OnePieceCardsPage({
         initialQ={sp.q ?? ""}
         initialSort={sort}
         action="/cards/onepiece"
+        setLabels={Object.fromEntries(
+          sets.sets.map((s) => [s.set_code, formatOnePieceSetLabel(s.set_code)]),
+        )}
       />
+
+      {/* セット (弾) の見出しチップ — メタの全弾を表示しSEO内部リンクを増やす */}
+      <div className="mb-4">
+        <div className="text-xs text-gray-500 mb-1.5">対応弾</div>
+        <div className="flex flex-wrap gap-1.5">
+          {(() => {
+            const dataCounts = Object.fromEntries(
+              sets.sets.map((s) => [s.set_code, s.count]),
+            );
+            const allCodes = Array.from(
+              new Set([
+                ...sets.sets.map((s) => s.set_code),
+                ...Object.keys(ONEPIECE_SETS),
+              ]),
+            ).sort((a, b) => b.localeCompare(a));
+            return allCodes.map((code) => {
+              const meta = getOnePieceSetMeta(code);
+              const cnt = dataCounts[code] ?? 0;
+              return (
+                <Link
+                  key={code}
+                  href={`/cards/onepiece/${code}`}
+                  className={`text-xs px-2 py-1 rounded border bg-white hover:bg-orange-50 ${
+                    sp.set === code
+                      ? "border-orange-500 ring-1 ring-orange-300"
+                      : "border-orange-300"
+                  } text-orange-900`}
+                >
+                  <span className="font-mono">{code}</span>
+                  {meta && <span className="ml-1">{meta.name}</span>}
+                  <span className="text-gray-400 ml-1">
+                    ({cnt > 0 ? cnt : "予定"})
+                  </span>
+                </Link>
+              );
+            });
+          })()}
+        </div>
+      </div>
 
       {groups.length === 0 ? (
         <p className="text-gray-500">

@@ -1,7 +1,10 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { getCardByCode, type CardVariant, type PriceStats, type PriceConfidence } from "../../../lib/api";
+import Link from "next/link";
+import { getCardByCode, listRelatedCards, type CardVariant, type CardSummary, type PriceStats, type PriceConfidence } from "../../../lib/api";
 import PriceChart from "../../../components/cards/PriceChart";
+import { getPokemonSetMeta } from "../../../lib/pokemonSets";
+import { getOnePieceSetMeta } from "../../../lib/onepieceSets";
 
 export const dynamic = "force-dynamic";
 
@@ -150,6 +153,26 @@ export default async function CardDetailPage({
   const buySeries = buildSeries(data.cards, "buy");
   const meta = getBrandMeta(data.cards[0]?.brand);
 
+  const firstCard = data.cards[0];
+  const relatedCards = await listRelatedCards(
+    firstCard.set_code,
+    firstCard.card_no,
+    8,
+  ).catch(() => [] as CardSummary[]);
+
+  const setMeta =
+    firstCard.brand === "pokemon"
+      ? getPokemonSetMeta(firstCard.set_code)
+      : firstCard.brand === "onepiece"
+        ? getOnePieceSetMeta(firstCard.set_code)
+        : null;
+  const setLandingPath =
+    firstCard.brand === "pokemon"
+      ? `/cards/pokemon/${firstCard.set_code}`
+      : firstCard.brand === "onepiece"
+        ? `/cards/onepiece/${firstCard.set_code}`
+        : null;
+
   // JSON-LD 構造化データ (Product schema)
   const productJsonLd = {
     "@context": "https://schema.org",
@@ -213,9 +236,18 @@ export default async function CardDetailPage({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
       <nav className="text-xs text-gray-500 mb-2">
-        <a href="/cards" className="hover:underline">価格DB</a>
+        <Link href="/cards" className="hover:underline">価格DB</Link>
         <span className="mx-1.5">/</span>
-        <a href={meta.listPath} className="hover:underline">{meta.name_short}</a>
+        <Link href={meta.listPath} className="hover:underline">{meta.name_short}</Link>
+        {setLandingPath && (
+          <>
+            <span className="mx-1.5">/</span>
+            <Link href={setLandingPath} className="hover:underline">
+              {firstCard.set_code}
+              {setMeta && <span className="ml-1">{setMeta.name}</span>}
+            </Link>
+          </>
+        )}
         <span className="mx-1.5">/</span>
         <span>{data.code}</span>
       </nav>
@@ -393,6 +425,56 @@ export default async function CardDetailPage({
 
       {/* SEO本文セクション (G-3 動的生成テンプレ) */}
       <CardDetailNotes cards={data.cards} cardCode={data.code} brandMeta={meta} />
+
+      {/* 関連カード — 同セット内の前後カード+ランダム数枚 (SEO 内部リンク) */}
+      {relatedCards.length > 0 && (
+        <section className="mt-8 border-t pt-6">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-lg font-bold">
+              同じセット ({firstCard.set_code}{setMeta && ` ${setMeta.name}`}) の他カード
+            </h2>
+            {setLandingPath && (
+              <Link
+                href={setLandingPath}
+                className="text-xs text-blue-700 hover:underline"
+              >
+                セット全カードを見る →
+              </Link>
+            )}
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
+            {relatedCards.map((c) => {
+              const code = `${c.set_code}-${c.card_no}`;
+              return (
+                <Link
+                  key={code}
+                  href={`/cards/${code}`}
+                  className="border rounded p-2 hover:shadow-sm transition-shadow flex flex-col text-center"
+                >
+                  {c.image_url ? (
+                    <img
+                      src={c.image_url}
+                      alt={`${c.name_ja} (${code})`}
+                      className="w-full h-auto mb-1 rounded"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full aspect-[5/7] bg-gray-100 mb-1 rounded flex items-center justify-center text-[10px] text-gray-400">
+                      No Img
+                    </div>
+                  )}
+                  <div className="text-[10px] text-gray-500 font-mono">
+                    {code}
+                  </div>
+                  <div className="text-[11px] leading-tight line-clamp-2">
+                    {c.name_ja}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

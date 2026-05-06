@@ -20,3 +20,6 @@ Thumbs.db
 # Uploads/results
 backend/static/uploads/
 backend/static/results/
+
+.vercel
+*.tsbuildinfo

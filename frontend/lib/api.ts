@@ -652,6 +652,46 @@ export async function listSets(brand: string = "onepiece"): Promise<{ sets: { se
   return { sets };
 }
 
+/**
+ * 同一セット内の関連カード (前後 + ランダム数枚) を返す。
+ * SEO 強化のため card 詳細ページの内部リンクとして使う。
+ */
+export async function listRelatedCards(
+  setCode: string,
+  currentCardNo: string,
+  limit: number = 8,
+): Promise<CardSummary[]> {
+  const select = "id,brand,set_code,card_no,variant,rarity,name_ja,image_url";
+  // 同一セットの全カード (variant=normal を優先)
+  const items = await sbGet<CardSummary[]>(
+    "cards",
+    `set_code=eq.${setCode.toUpperCase()}&select=${select}&order=card_no.asc,variant.asc&limit=2000`,
+  );
+  // card_no でユニーク化 (variant 重複を除く)
+  const seen = new Set<string>();
+  const uniq: CardSummary[] = [];
+  for (const c of items) {
+    if (seen.has(c.card_no)) continue;
+    seen.add(c.card_no);
+    uniq.push(c);
+  }
+  // 自分自身を除外
+  const others = uniq.filter((c) => c.card_no !== currentCardNo);
+  // 前後カード優先 + ランダム抽出で limit 件
+  const sorted = [...others].sort((a, b) => {
+    const an = parseInt(a.card_no, 10);
+    const bn = parseInt(b.card_no, 10);
+    const cur = parseInt(currentCardNo, 10);
+    const ad = Math.abs(an - cur);
+    const bd = Math.abs(bn - cur);
+    return ad - bd;
+  });
+  return sorted.slice(0, limit).map((c) => ({
+    ...c,
+    image_url: cleanImageUrl(c.image_url),
+  }));
+}
+
 export async function searchEbaySold(
   query: string,
   brand: string = ""
