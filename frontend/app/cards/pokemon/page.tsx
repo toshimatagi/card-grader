@@ -132,7 +132,9 @@ export default async function PokemonCardsPage({
         initialQ={sp.q ?? ""}
         initialSort={sort}
         action="/cards/pokemon"
-        labelForSet={formatPokemonSetLabel}
+        setLabels={Object.fromEntries(
+          sets.sets.map((s) => [s.set_code, formatPokemonSetLabel(s.set_code)])
+        )}
       />
 
       {/* セット (弾) の見出しチップ */}

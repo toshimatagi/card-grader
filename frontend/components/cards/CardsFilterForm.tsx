@@ -20,7 +20,7 @@ export function CardsFilterForm({
   initialQ,
   initialSort,
   action = "/cards",
-  labelForSet,
+  setLabels,
 }: {
   sets: SetOption[];
   rarities: string[];
@@ -30,10 +30,12 @@ export function CardsFilterForm({
   initialSort: string;
   action?: string;
   /**
-   * set_code から表示ラベルへの変換関数。例: 'M04' → 'M04 ニンジャスピナー'
+   * 事前計算された set_code → 表示ラベルのマップ。
+   * 例: { 'M04': 'M04 ニンジャスピナー', 'M03': 'M03 ムニキスゼロ' }
    * 省略時は set_code をそのまま表示。
+   * 関数は Server Component → Client Component に渡せないため Record で受け取る。
    */
-  labelForSet?: (code: string) => string;
+  setLabels?: Record<string, string>;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -52,7 +54,7 @@ export function CardsFilterForm({
       >
         <option value="">全セット</option>
         {sets.map((s) => {
-          const label = labelForSet ? labelForSet(s.set_code) : s.set_code;
+          const label = setLabels?.[s.set_code] ?? s.set_code;
           return (
             <option key={s.set_code} value={s.set_code}>
               {label} ({s.count})
