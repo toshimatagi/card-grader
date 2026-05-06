@@ -399,7 +399,7 @@ export default async function CardsLandingPage() {
               {opTopSets.map((s) => (
                 <Link
                   key={s.set_code}
-                  href={`/cards/onepiece?set=${s.set_code}`}
+                  href={`/cards/onepiece/${s.set_code}`}
                   className="text-xs px-2 py-1 rounded border border-red-200 bg-white hover:bg-red-50 text-red-700"
                 >
                   {s.set_code}
@@ -418,7 +418,7 @@ export default async function CardsLandingPage() {
                 return (
                   <Link
                     key={s.set_code}
-                    href={`/cards/pokemon?set=${s.set_code}`}
+                    href={`/cards/pokemon/${s.set_code}`}
                     className="text-xs px-2 py-1 rounded border border-yellow-300 bg-white hover:bg-yellow-50 text-yellow-800"
                   >
                     <span className="font-mono">{s.set_code}</span>
