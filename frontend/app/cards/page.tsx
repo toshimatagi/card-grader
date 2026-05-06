@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getTrending, listSets, type TrendingCard } from "../../lib/api";
+import { getPokemonSetMeta } from "../../lib/pokemonSets";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 600; // 10分
@@ -412,16 +413,20 @@ export default async function CardsLandingPage() {
           <div>
             <h3 className="text-sm font-bold mb-2 text-yellow-800">ポケカ</h3>
             <div className="flex flex-wrap gap-1.5">
-              {pkmTopSets.map((s) => (
-                <Link
-                  key={s.set_code}
-                  href={`/cards/pokemon?set=${s.set_code}`}
-                  className="text-xs px-2 py-1 rounded border border-yellow-300 bg-white hover:bg-yellow-50 text-yellow-800"
-                >
-                  {s.set_code}
-                  <span className="text-gray-400 ml-1">{s.count}枚</span>
-                </Link>
-              ))}
+              {pkmTopSets.map((s) => {
+                const meta = getPokemonSetMeta(s.set_code);
+                return (
+                  <Link
+                    key={s.set_code}
+                    href={`/cards/pokemon?set=${s.set_code}`}
+                    className="text-xs px-2 py-1 rounded border border-yellow-300 bg-white hover:bg-yellow-50 text-yellow-800"
+                  >
+                    <span className="font-mono">{s.set_code}</span>
+                    {meta && <span className="ml-1">{meta.name}</span>}
+                    <span className="text-gray-400 ml-1">{s.count}枚</span>
+                  </Link>
+                );
+              })}
             </div>
           </div>
         )}

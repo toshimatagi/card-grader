@@ -20,6 +20,7 @@ export function CardsFilterForm({
   initialQ,
   initialSort,
   action = "/cards",
+  labelForSet,
 }: {
   sets: SetOption[];
   rarities: string[];
@@ -28,6 +29,11 @@ export function CardsFilterForm({
   initialQ: string;
   initialSort: string;
   action?: string;
+  /**
+   * set_code から表示ラベルへの変換関数。例: 'M04' → 'M04 ニンジャスピナー'
+   * 省略時は set_code をそのまま表示。
+   */
+  labelForSet?: (code: string) => string;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -45,11 +51,14 @@ export function CardsFilterForm({
         className="border px-3 py-2 rounded text-sm"
       >
         <option value="">全セット</option>
-        {sets.map((s) => (
-          <option key={s.set_code} value={s.set_code}>
-            {s.set_code} ({s.count})
-          </option>
-        ))}
+        {sets.map((s) => {
+          const label = labelForSet ? labelForSet(s.set_code) : s.set_code;
+          return (
+            <option key={s.set_code} value={s.set_code}>
+              {label} ({s.count})
+            </option>
+          );
+        })}
       </select>
 
       <select
