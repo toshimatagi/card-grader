@@ -11,6 +11,7 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/api/", "/_next/"],
       },
     ],
+    // sitemap index (/sitemap.xml) が /sitemap/{id}.xml を束ねる
     sitemap: `${SITE_URL}/sitemap.xml`,
     host: SITE_URL,
   };
