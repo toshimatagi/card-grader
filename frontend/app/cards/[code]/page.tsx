@@ -1,7 +1,19 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getCardByCode, listRelatedCards, type CardVariant, type CardSummary, type PriceStats, type PriceConfidence } from "../../../lib/api";
+import {
+  getCardByCode,
+  listRelatedCards,
+  listGradePrices,
+  GRADE_LABEL,
+  GRADE_DISPLAY_ORDER,
+  type CardVariant,
+  type CardSummary,
+  type CardGradePrice,
+  type CardGrade,
+  type PriceStats,
+  type PriceConfidence,
+} from "../../../lib/api";
 import PriceChart from "../../../components/cards/PriceChart";
 import { getPokemonSetMeta } from "../../../lib/pokemonSets";
 import { getOnePieceSetMeta } from "../../../lib/onepieceSets";
@@ -154,11 +166,26 @@ export default async function CardDetailPage({
   const meta = getBrandMeta(data.cards[0]?.brand);
 
   const firstCard = data.cards[0];
-  const relatedCards = await listRelatedCards(
-    firstCard.set_code,
-    firstCard.card_no,
-    8,
-  ).catch(() => [] as CardSummary[]);
+  const [relatedCards, gradePrices] = await Promise.all([
+    listRelatedCards(firstCard.set_code, firstCard.card_no, 8).catch(
+      () => [] as CardSummary[],
+    ),
+    listGradePrices(data.cards.map((c) => c.id)).catch(
+      () => [] as CardGradePrice[],
+    ),
+  ]);
+
+  // variant 横断で grade 別の最高サンプルを集約 (variant 毎にデータが薄いため)
+  const gradeAggregated: Record<string, CardGradePrice> = {};
+  for (const gp of gradePrices) {
+    const cur = gradeAggregated[gp.grade];
+    if (!cur || (gp.sample_count ?? 0) > (cur.sample_count ?? 0)) {
+      gradeAggregated[gp.grade] = gp;
+    }
+  }
+  const sortedGrades = GRADE_DISPLAY_ORDER.filter(
+    (g) => gradeAggregated[g] != null,
+  );
 
   const setMeta =
     firstCard.brand === "pokemon"
@@ -412,6 +439,101 @@ export default async function CardDetailPage({
           ※ 複数の取扱いサイトから集計した中央値を表示しています
         </p>
       </div>
+
+      {/* グレード別 推定相場 (PriceCharting 風) */}
+      <section className="mb-8">
+        <h2 className="font-bold mb-2">状態別 推定相場</h2>
+        {sortedGrades.length === 0 ? (
+          <div className="border border-dashed border-gray-300 rounded p-4 text-sm text-gray-500">
+            <p className="mb-2">
+              このカードのグレード別 (Raw / PSA10 / PSA9 等) 相場データはまだ収集中です。
+            </p>
+            <p className="text-xs">
+              メルカリ売り切れ・eBay sold データから日次集計しています。データが揃い次第ここに表示されます。
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {sortedGrades.map((grade) => {
+                const gp = gradeAggregated[grade as CardGrade];
+                const updated = gp.captured_at
+                  ? new Date(gp.captured_at).toISOString().slice(0, 10)
+                  : "-";
+                const isPSA10 = grade === "psa10";
+                return (
+                  <div
+                    key={grade}
+                    className={`rounded-lg border p-3 ${
+                      isPSA10
+                        ? "border-amber-400 bg-amber-50"
+                        : "border-gray-200 bg-white"
+                    }`}
+                  >
+                    <div className="text-xs font-bold mb-1 text-gray-700">
+                      {GRADE_LABEL[grade as CardGrade]}
+                    </div>
+                    <div
+                      className={`text-xl font-extrabold tabular-nums ${
+                        isPSA10 ? "text-amber-700" : "text-gray-900"
+                      }`}
+                    >
+                      {gp.price_median != null
+                        ? `¥${gp.price_median.toLocaleString()}`
+                        : "-"}
+                    </div>
+                    {gp.price_min != null && gp.price_max != null &&
+                      gp.price_min !== gp.price_max && (
+                        <div className="text-[11px] text-gray-500 mt-0.5 tabular-nums">
+                          ¥{gp.price_min.toLocaleString()}〜¥
+                          {gp.price_max.toLocaleString()}
+                        </div>
+                      )}
+                    <div className="text-[10px] text-gray-400 mt-1">
+                      {gp.sample_count}件・{updated}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-gray-500 mt-3 leading-relaxed">
+              ※ メルカリ売り切れ ・ eBay sold データから集計した参考相場です。
+              グレード別の販売価格は出品者によりばらつきがあるため、最終判断は実物確認と公式鑑定機関にお任せください。
+              {gradeAggregated.psa10 && gradeAggregated.raw &&
+                gradeAggregated.psa10.price_median != null &&
+                gradeAggregated.raw.price_median != null && (
+                  <>
+                    {" "}PSA10 は Raw の約{" "}
+                    <strong>
+                      {(
+                        gradeAggregated.psa10.price_median /
+                        Math.max(gradeAggregated.raw.price_median, 1)
+                      ).toFixed(1)}
+                      倍
+                    </strong>
+                    で取引されています。
+                  </>
+                )}
+            </p>
+            {/* 鑑定への動線 */}
+            <div className="mt-3 p-3 rounded-lg bg-blue-50 border border-blue-100">
+              <div className="text-sm text-blue-900 mb-1 font-semibold">
+                💡 PSA提出を検討中の方へ
+              </div>
+              <p className="text-xs text-blue-900 leading-relaxed">
+                提出前に表面・裏面の状態を AI 鑑定でチェックして、PSA10 / PSA9
+                が狙えるかを事前判断できます。
+              </p>
+              <Link
+                href="/"
+                className="inline-block mt-2 px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                AI鑑定で表裏チェック →
+              </Link>
+            </div>
+          </>
+        )}
+      </section>
 
       <section className="mb-8">
         <h2 className="font-bold mb-2">販売価格の推移</h2>

@@ -652,6 +652,62 @@ export async function listSets(brand: string = "onepiece"): Promise<{ sets: { se
   return { sets };
 }
 
+// ============================================================
+// グレード別価格 (PriceCharting 風: Raw / PSA10 / PSA9 / BGS 別)
+// ============================================================
+
+export type CardGrade = "raw" | "psa10" | "psa9" | "psa8" | "bgs10" | "bgs9.5";
+
+export interface CardGradePrice {
+  card_id: string;
+  grade: CardGrade;
+  source: string;
+  captured_at: string;
+  price_median: number | null;
+  price_min: number | null;
+  price_max: number | null;
+  sample_count: number;
+}
+
+/**
+ * card_id 群に対する最新グレード別価格を取得 (raw/psa10/psa9 等)。
+ * テーブル未作成時 (migration 008 未適用時) は空配列で graceful fallback。
+ */
+export async function listGradePrices(
+  cardIds: string[],
+): Promise<CardGradePrice[]> {
+  if (cardIds.length === 0) return [];
+  const ids = cardIds.join(",");
+  try {
+    const rows = await sbGet<CardGradePrice[]>(
+      "card_grade_prices_latest",
+      `card_id=in.(${ids})&select=*`,
+    );
+    return rows;
+  } catch {
+    // テーブル/ビュー未作成、または PostgREST スキーマキャッシュ未反映時
+    return [];
+  }
+}
+
+export const GRADE_LABEL: Record<CardGrade, string> = {
+  raw: "Raw (未鑑定)",
+  psa10: "PSA10 (Gem Mint)",
+  psa9: "PSA9 (Mint)",
+  psa8: "PSA8 (NM-MT)",
+  bgs10: "BGS10 (Pristine)",
+  "bgs9.5": "BGS9.5 (Gem Mint)",
+};
+
+export const GRADE_DISPLAY_ORDER: CardGrade[] = [
+  "psa10",
+  "bgs10",
+  "psa9",
+  "bgs9.5",
+  "psa8",
+  "raw",
+];
+
 /**
  * 同一セット内の関連カード (前後 + ランダム数枚) を返す。
  * SEO 強化のため card 詳細ページの内部リンクとして使う。
