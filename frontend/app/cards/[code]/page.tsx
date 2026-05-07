@@ -449,7 +449,7 @@ export default async function CardDetailPage({
               このカードのグレード別 (Raw / PSA10 / PSA9 等) 相場データはまだ収集中です。
             </p>
             <p className="text-xs">
-              メルカリ売り切れ・eBay sold データから日次集計しています。データが揃い次第ここに表示されます。
+              国内オークション・フリマの売却済みデータから日次集計しています。データが揃い次第ここに表示されます。
             </p>
           </div>
         ) : (
@@ -497,7 +497,7 @@ export default async function CardDetailPage({
               })}
             </div>
             <p className="text-[11px] text-gray-500 mt-3 leading-relaxed">
-              ※ メルカリ売り切れ ・ eBay sold データから集計した参考相場です。
+              ※ 国内オークション・フリマ等の売却済みデータから集計した参考相場です。
               グレード別の販売価格は出品者によりばらつきがあるため、最終判断は実物確認と公式鑑定機関にお任せください。
               {gradeAggregated.psa10 && gradeAggregated.raw &&
                 gradeAggregated.psa10.price_median != null &&
