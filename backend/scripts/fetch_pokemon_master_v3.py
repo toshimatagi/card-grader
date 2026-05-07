@@ -70,13 +70,15 @@ PAST_2YEARS_CODES = {
 
 # 詳細ページのHTML/markdown から抽出する正規表現
 TITLE_RE = re.compile(r"^# ([^\n]+)$", re.MULTILINE)
+# pokemon-card.com は SV4a, SV6a, SV7p のように subset を小文字 a/p/etc で表現するため
+# 正規表現は [A-Za-z0-9]+ にして、parse 後に upper() で正規化する
 SET_SLUG_RE = re.compile(
-    r"/assets/images/card/regulation_logo_1/([A-Z0-9]+)\.gif"
+    r"/assets/images/card/regulation_logo_1/([A-Za-z0-9]+)\.gif"
 )
 CARD_NO_RE = re.compile(r"\]?(\d{1,3})/(\d{1,3})!\[")
 RARITY_RE = re.compile(r"/assets/images/card/rarity/ic_rare_([a-z0-9_]+)\.gif")
 IMG_URL_RE = re.compile(
-    r"https?://www\.pokemon-card\.com/assets/images/card_images/large/[A-Z0-9]+/(\d{6})_[A-Z]_[A-Z0-9]+\.jpg"
+    r"https?://www\.pokemon-card\.com/assets/images/card_images/large/[A-Za-z0-9]+/(\d{6})_[A-Z]_[A-Za-z0-9]+\.jpg"
 )
 
 
@@ -92,7 +94,7 @@ def parse_detail(text: str) -> Optional[dict]:
     slug_m = SET_SLUG_RE.search(text)
     if not slug_m:
         return None
-    slug = slug_m.group(1)
+    slug = slug_m.group(1).upper()  # SV4a → SV4A 等で大文字統一
 
     no_m = CARD_NO_RE.search(text)
     if not no_m:
@@ -122,9 +124,10 @@ def parse_detail(text: str) -> Optional[dict]:
 def _normalize_rarity(raw: str) -> str:
     """rarity_logo の slug を当DB標準のレア度文字列に正規化"""
     raw = raw.lower()
-    # ic_rare_c_c, ic_rare_c_uc, ic_rare_c_r, ic_rare_c_rr, ic_rare_c_rrr
-    # ic_rare_c_sr, ic_rare_c_sar, ic_rare_c_ur, ic_rare_c_chr (CHR)
-    # ic_rare_c_ar (AR), ic_rare_c_aceSpec
+    # 新形式 (SV-era 以降): ic_rare_s_2 (SAR), ic_rare_s_1 (SR), ic_rare_a_1/_2 (AR/SAR)
+    # 旧形式: ic_rare_c_c, _c_uc, _c_r, _c_rr, _c_rrr, _c_sr, _c_sar, _c_ur, _c_chr,
+    #         _c_ar, _c_aceSpec
+    # 末尾の _数字 / _文字 で識別
     if raw.endswith("_sar"):
         return "SAR"
     if raw.endswith("_ar"):
@@ -137,16 +140,23 @@ def _normalize_rarity(raw: str) -> str:
         return "RRR"
     if raw.endswith("_rr"):
         return "RR"
+    if raw.endswith("_chr"):
+        return "CHR"
+    if "acespec" in raw:
+        return "ACE"
+    # 新形式 ic_rare_s_2 系 — s_数字 / a_数字 で SR/SAR/AR を識別
+    if raw in ("s_2", "s_3") or raw.endswith("_s_2") or raw.endswith("_s_3"):
+        return "SAR"
+    if raw == "s_1" or raw.endswith("_s_1"):
+        return "SR"
+    if raw in ("a_1", "a_2") or raw.endswith("_a_1") or raw.endswith("_a_2"):
+        return "AR"
     if raw.endswith("_r"):
         return "R"
     if raw.endswith("_uc"):
         return "U"
     if raw.endswith("_c_c") or raw.endswith("_c"):
         return "C"
-    if raw.endswith("_chr"):
-        return "CHR"
-    if raw.endswith("acespec"):
-        return "ACE"
     if raw.endswith("_p"):
         return "P"
     return raw.upper()
