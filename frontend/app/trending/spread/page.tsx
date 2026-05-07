@@ -21,7 +21,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const sp = await searchParams;
   const brand = BRANDS.find((b) => b.key === sp.brand) ?? BRANDS[0];
-  const title = `Raw → PSA10 価格倍率 TOP - 鑑定で旨味あるカード (${brand.short})`;
+  const title = `Raw → PSA10 価格倍率 TOP・鑑定で旨味あるカード (${brand.short})`;
   const description = `${brand.short}で「Raw → PSA10 にしたとき価格が大きく跳ねるカード」を倍率順にランキング。仕入れ判断・PSA提出判断・利幅シミュレーションに使える独自ランキング。`;
   return {
     title,

@@ -21,7 +21,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const sp = await searchParams;
   const brand = BRANDS.find((b) => b.key === sp.brand) ?? BRANDS[0];
-  const title = `Raw (未鑑定) 高額カードランキング (${brand.short}) - TCG Authority`;
+  const title = `Raw (未鑑定) 高額カードランキング (${brand.short})`;
   const description = `${brand.short}で未鑑定 (Raw) のままでも高値で取引されるカードを中央値の高い順にランキング。フリマ・オークションでの実売価格ベース。`;
   return {
     title,

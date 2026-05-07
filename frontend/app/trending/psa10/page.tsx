@@ -23,7 +23,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const sp = await searchParams;
   const brand = BRANDS.find((b) => b.key === sp.brand) ?? BRANDS[0];
-  const title = `PSA10 高額カードランキング (${brand.short}) - TCG Authority`;
+  const title = `PSA10 高額カードランキング (${brand.short})`;
   const description = `${brand.short}の PSA10 鑑定カード相場 TOP100。中央値の高い順にランキング表示。Raw との価格差・倍率も併記。フリマ仕入れ・PSA提出判断の参考に。`;
   return {
     title,
