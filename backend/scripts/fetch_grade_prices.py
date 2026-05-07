@@ -130,20 +130,53 @@ async def fetch_cards_to_process(
     client: httpx.AsyncClient,
     brand: str,
     limit: int,
+    *,
+    skip_existing: bool = True,
+    skip_within_hours: int = 168,
 ) -> list[dict]:
-    """rarity != 'UNKNOWN' の代表カード (高レア優先) を取得"""
+    """rarity != 'UNKNOWN' の代表カード (高レア優先) を取得。
+    skip_existing=True なら直近 skip_within_hours 以内に
+    card_grade_prices に登録済みの card_id を除外する (重複処理回避)。"""
     high_rarity = [
-        "SAR", "UR", "SR", "SEC", "L", "SP",  # ポケカ + ワンピ高レア
+        "SAR", "UR", "SR", "SEC", "L", "SP",
         "AR", "MUR", "RRR", "RR", "RAR",
     ]
     rarity_filter = "rarity=in.(" + ",".join(high_rarity) + ")"
+
+    # 直近処理済みの card_id を収集して除外
+    skip_ids: set[str] = set()
+    if skip_existing:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=skip_within_hours)).isoformat()
+        try:
+            r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/card_grade_prices",
+                params={
+                    "select": "card_id",
+                    "captured_at": f"gte.{cutoff}",
+                    "limit": "5000",
+                },
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            for row in r.json():
+                skip_ids.add(row["card_id"])
+        except Exception as e:
+            print(f"[warn] skip-list fetch failed: {e}", file=sys.stderr)
+
+    # まず多めに取得して skip_ids でフィルタ
+    fetch_limit = limit * 4
     qs = (
         f"brand=eq.{brand}"
         f"&{rarity_filter}"
         f"&variant=eq.normal"
         f"&select=id,set_code,card_no,name_ja,rarity"
         f"&order=updated_at.desc"
-        f"&limit={limit}"
+        f"&limit={fetch_limit}"
     )
     r = await client.get(
         f"{SUPABASE_URL}/rest/v1/cards?{qs}",
@@ -154,7 +187,15 @@ async def fetch_cards_to_process(
         timeout=15,
     )
     r.raise_for_status()
-    return r.json()
+    all_cards = r.json()
+    filtered = [c for c in all_cards if c["id"] not in skip_ids]
+    if skip_ids:
+        print(
+            f"[*] skipping {len(all_cards) - len(filtered)} cards already "
+            f"scraped within last {skip_within_hours}h",
+            file=sys.stderr,
+        )
+    return filtered[:limit]
 
 
 async def upsert_grade_price(
