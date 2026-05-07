@@ -690,6 +690,152 @@ export async function listGradePrices(
   }
 }
 
+/**
+ * 単一グレードでの「現状価格 TOP」ランキング。
+ * /trending/psa10, /trending/raw 等のページ向け。
+ * brand 指定なしで両ブランド横断、指定で絞り込み。
+ */
+export interface GradeRankingRow {
+  card_id: string;
+  grade: CardGrade;
+  price_median: number;
+  price_min: number | null;
+  price_max: number | null;
+  sample_count: number;
+  captured_at: string;
+  brand: string;
+  set_code: string;
+  card_no: string;
+  rarity: string;
+  name_ja: string;
+  image_url: string | null;
+}
+
+export async function listGradeRanking(params: {
+  grade: CardGrade;
+  brand?: string;
+  limit?: number;
+  minSamples?: number;
+}): Promise<GradeRankingRow[]> {
+  const limit = params.limit ?? 50;
+  const minSamples = params.minSamples ?? 3;
+  const select =
+    "card_id,grade,price_median,price_min,price_max,sample_count,captured_at," +
+    "cards!inner(brand,set_code,card_no,rarity,name_ja,image_url)";
+  const filters: string[] = [
+    `grade=eq.${params.grade}`,
+    `sample_count=gte.${minSamples}`,
+  ];
+  if (params.brand) {
+    filters.push(`cards.brand=eq.${params.brand}`);
+  }
+  filters.push(`select=${select}`);
+  filters.push(`order=price_median.desc.nullslast`);
+  filters.push(`limit=${limit * 2}`);  // brand フィルタ後で減ることを想定して多めに
+
+  try {
+    const rows = await sbGet<
+      Array<{
+        card_id: string;
+        grade: CardGrade;
+        price_median: number;
+        price_min: number | null;
+        price_max: number | null;
+        sample_count: number;
+        captured_at: string;
+        cards: {
+          brand: string;
+          set_code: string;
+          card_no: string;
+          rarity: string;
+          name_ja: string;
+          image_url: string | null;
+        };
+      }>
+    >("card_grade_prices_latest", filters.join("&"));
+
+    return rows
+      .filter((r) => r.cards != null)
+      .map((r) => ({
+        card_id: r.card_id,
+        grade: r.grade,
+        price_median: r.price_median,
+        price_min: r.price_min,
+        price_max: r.price_max,
+        sample_count: r.sample_count,
+        captured_at: r.captured_at,
+        brand: r.cards.brand,
+        set_code: r.cards.set_code,
+        card_no: r.cards.card_no,
+        rarity: r.cards.rarity,
+        name_ja: r.cards.name_ja,
+        image_url: cleanImageUrl(r.cards.image_url),
+      }))
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Raw → PSA10 のスプレッド倍率ランキング。
+ * 同一カードで raw と psa10 両方データがあるカードのみ対象、
+ * (psa10_median / raw_median) を比率として算出。
+ *
+ * 「鑑定に出すと一番得するカード」=「PSA10 にしたとき価格が大きく跳ねるカード」
+ * を一覧化する PriceCharting にない独自軸。
+ */
+export interface SpreadRankingRow extends GradeRankingRow {
+  raw_median: number;
+  psa10_median: number;
+  multiplier: number; // psa10 / raw
+  diff: number; // psa10 - raw
+}
+
+export async function listSpreadRanking(params: {
+  brand?: string;
+  limit?: number;
+  minSamples?: number;
+  minRawPrice?: number;
+}): Promise<SpreadRankingRow[]> {
+  const limit = params.limit ?? 50;
+  const minSamples = params.minSamples ?? 3;
+  const minRawPrice = params.minRawPrice ?? 100;
+
+  // psa10 と raw を別々に取って同じ card_id で結合
+  const [psa10Rows, rawRows] = await Promise.all([
+    listGradeRanking({
+      grade: "psa10",
+      brand: params.brand,
+      limit: 500,
+      minSamples,
+    }),
+    listGradeRanking({
+      grade: "raw",
+      brand: params.brand,
+      limit: 500,
+      minSamples,
+    }),
+  ]);
+
+  const rawMap = new Map(rawRows.map((r) => [r.card_id, r]));
+  const out: SpreadRankingRow[] = [];
+  for (const p of psa10Rows) {
+    const r = rawMap.get(p.card_id);
+    if (!r || !r.price_median || r.price_median < minRawPrice) continue;
+    const mult = p.price_median / r.price_median;
+    out.push({
+      ...p,
+      raw_median: r.price_median,
+      psa10_median: p.price_median,
+      multiplier: mult,
+      diff: p.price_median - r.price_median,
+    });
+  }
+  out.sort((a, b) => b.multiplier - a.multiplier);
+  return out.slice(0, limit);
+}
+
 export const GRADE_LABEL: Record<CardGrade, string> = {
   raw: "Raw (未鑑定)",
   psa10: "PSA10 (Gem Mint)",

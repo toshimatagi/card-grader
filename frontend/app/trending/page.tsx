@@ -122,9 +122,31 @@ export default async function TrendingPage({
   return (
     <div>
       <h1 className="text-2xl font-bold mb-2">値上がりランキング</h1>
-      <p className="text-sm text-gray-600 mb-6">
+      <p className="text-sm text-gray-600 mb-3">
         指定期間で{ptype.label}の中央値が上昇した{brand.short}を表示。
       </p>
+
+      {/* グレード別ランキングへの動線 */}
+      <div className="mb-6 flex flex-wrap gap-2 text-xs">
+        <Link
+          href={`/trending/psa10?brand=${brand.key}`}
+          className="px-3 py-1.5 rounded border border-amber-300 bg-white hover:bg-amber-50 text-amber-900 font-medium"
+        >
+          🏆 PSA10 高額TOP
+        </Link>
+        <Link
+          href={`/trending/spread?brand=${brand.key}`}
+          className="px-3 py-1.5 rounded border border-emerald-300 bg-white hover:bg-emerald-50 text-emerald-900 font-medium"
+        >
+          💰 Raw→PSA10 倍率TOP
+        </Link>
+        <Link
+          href={`/trending/raw?brand=${brand.key}`}
+          className="px-3 py-1.5 rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-700"
+        >
+          📦 Raw 高額TOP
+        </Link>
+      </div>
 
       {/* ブランドタブ */}
       <div className="flex gap-2 mb-3 flex-wrap">
