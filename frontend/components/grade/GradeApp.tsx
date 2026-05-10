@@ -44,6 +44,11 @@ export default function GradeApp() {
   const [dragActive, setDragActive] = useState<"front" | "back" | null>(null);
   const [step, setStep] = useState<AppStep>("upload");
   const [cameraTarget, setCameraTarget] = useState<CameraTarget>(null);
+  // 画像のソース (camera = 自動撮影で枠合わせ済み, upload = アップロード/D&D)
+  // camera 由来は既に枠合わせ済みなので auto-warp を適用しない
+  // (誤検出で画像が引き延ばされるのを防ぐ)
+  const [frontSource, setFrontSource] = useState<"camera" | "upload">("upload");
+  const [backSource, setBackSource] = useState<"camera" | "upload">("upload");
 
   // ブランド・レアリティ選択
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -90,8 +95,9 @@ export default function GradeApp() {
     }
   }, []);
 
-  const handleFile = useCallback((f: File) => {
+  const handleFile = useCallback((f: File, source: "camera" | "upload" = "upload") => {
     setFile(f);
+    setFrontSource(source);
     setError(null);
     setResult(null);
     const reader = new FileReader();
@@ -100,8 +106,9 @@ export default function GradeApp() {
     runIdentify(f);
   }, [runIdentify]);
 
-  const handleBackFile = useCallback((f: File) => {
+  const handleBackFile = useCallback((f: File, source: "camera" | "upload" = "upload") => {
     setBackFile(f);
+    setBackSource(source);
     setError(null);
     const reader = new FileReader();
     reader.onload = (e) => setBackPreview(e.target?.result as string);
@@ -136,8 +143,15 @@ export default function GradeApp() {
     try {
       const tasks: Promise<unknown>[] = [
         preprocessImage(file).then((pre) => {
-          setCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
-          setOuterBox(pre.outer_box ?? null);
+          // camera 由来は枠合わせ済なので auto-warp で引き延ばされるのを避け
+          // raw 原画像を表示する。upload 由来 (D&D 等) は従来通り auto-warp 結果。
+          if (frontSource === "camera") {
+            setCorrectedImage(`data:image/jpeg;base64,${pre.original_image}`);
+            setOuterBox(null);
+          } else {
+            setCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
+            setOuterBox(pre.outer_box ?? null);
+          }
           setOriginalImage(pre.original_image);
           setOriginalCorners(pre.original_corners);
           setOriginalSize(pre.original_size);
@@ -147,9 +161,9 @@ export default function GradeApp() {
         tasks.push(
           preprocessImage(backFile).then((pre) => {
             // 裏面はパターンが均一で auto-corner-detection が外しやすく、
-            // そのまま auto-warp すると画像が引き延ばされて表示されるため、
-            // 既定では warp を適用せず raw 原画像を表示。手動で「傾き調整」を
-            // 実行した時だけ正面化結果に切り替える。
+            // 表面と同じく auto-warp で引き延ばされるため、既定では warp を
+            // 適用せず raw 原画像を表示。手動で「傾き調整」を実行した時だけ
+            // 正面化結果に切り替える。
             setBackCorrectedImage(`data:image/jpeg;base64,${pre.original_image}`);
             setBackOuterBox(null);
             setBackOriginalImage(pre.original_image);
@@ -316,9 +330,9 @@ export default function GradeApp() {
         <CameraCapture
           onCapture={(f) => {
             if (cameraTarget === "front") {
-              handleFile(f);
+              handleFile(f, "camera");
             } else if (cameraTarget === "back") {
-              handleBackFile(f);
+              handleBackFile(f, "camera");
             }
             setCameraTarget(null);
           }}
