@@ -1,5 +1,10 @@
 import Link from "next/link";
-import { getTrending, type TrendingCard } from "../../lib/api";
+import {
+  getTrending,
+  listSpreadRanking,
+  type TrendingCard,
+  type SpreadRankingRow,
+} from "../../lib/api";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
@@ -80,7 +85,7 @@ const BRAND_BADGE: Record<string, { label: string; cls: string }> = {
 };
 
 export default async function HomeHero() {
-  const [stats, opTrending, pkmTrending] = await Promise.all([
+  const [stats, opTrending, pkmTrending, spreadTop] = await Promise.all([
     getStats().catch(
       () => ({ cardCount: 0, opCount: 0, pkmCount: 0, latestSnapshot: null }) as Stats
     ),
@@ -89,6 +94,9 @@ export default async function HomeHero() {
     ),
     getTrending({ brand: "pokemon", periodHours: 168, priceType: "sell", limit: 5 }).catch(
       () => [] as TrendingCard[]
+    ),
+    listSpreadRanking({ limit: 3, minSamples: 5, minRawPrice: 200 }).catch(
+      () => [] as SpreadRankingRow[]
     ),
   ]);
 
@@ -155,8 +163,85 @@ export default async function HomeHero() {
           >
             📈 値上がりカード
           </a>
+          <a
+            href="/trending/psa10"
+            className="inline-block px-5 py-2 bg-amber-400/90 text-gray-900 font-bold rounded-full text-sm hover:bg-amber-300 transition-colors"
+          >
+            🏆 PSA10 高額TOP
+          </a>
         </div>
       </div>
+
+      {/* PSA10 倍率 ヒーロー — 鑑定で旨味のあるカードランキング */}
+      {spreadTop.length > 0 && (
+        <section className="mb-6 rounded-xl border-2 border-emerald-300 bg-gradient-to-r from-emerald-50 to-yellow-50 p-4">
+          <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-lg font-bold text-emerald-900">
+              💰 鑑定で価格が跳ねるカード TOP3{" "}
+              <span className="text-xs text-gray-600 font-normal">
+                (Raw → PSA10 倍率)
+              </span>
+            </h2>
+            <Link
+              href="/trending/spread"
+              className="text-sm text-emerald-700 hover:underline whitespace-nowrap"
+            >
+              倍率TOP全体 →
+            </Link>
+          </div>
+          <p className="text-xs text-gray-700 mb-3 leading-relaxed">
+            未鑑定 (Raw) と PSA10 で大きな価格差があるカード。
+            状態が良ければ提出で利幅が出やすい候補。
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {spreadTop.map((r, i) => {
+              const code = `${r.set_code}-${r.card_no}`;
+              const badge = BRAND_BADGE[r.brand] ?? null;
+              return (
+                <Link
+                  key={r.card_id}
+                  href={`/cards/${code}`}
+                  className="flex items-center gap-2 p-2 rounded bg-white border border-emerald-200 hover:shadow-md transition-shadow"
+                >
+                  <span className="text-base font-bold text-emerald-700 w-5 text-center">
+                    {i + 1}
+                  </span>
+                  {r.image_url ? (
+                    <img
+                      src={r.image_url}
+                      alt={r.name_ja}
+                      className="w-10 h-auto rounded border flex-shrink-0"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-10 aspect-[5/7] bg-gray-100 rounded flex-shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-bold truncate">
+                      {r.name_ja}
+                    </div>
+                    <div className="text-[10px] text-gray-500 truncate">
+                      <span className="font-mono">{code}</span>
+                      {badge && (
+                        <span className={`ml-1 px-1 rounded text-[9px] border ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-gray-600 truncate">
+                      Raw ¥{r.raw_median.toLocaleString()} → PSA10 ¥
+                      {r.psa10_median.toLocaleString()}
+                    </div>
+                  </div>
+                  <span className="text-base font-extrabold text-emerald-700 whitespace-nowrap">
+                    {r.multiplier.toFixed(1)}倍
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* 値上がり Top 3 (両ブランド合算) */}
       {trending.length > 0 && (

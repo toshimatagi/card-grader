@@ -54,6 +54,44 @@ export default function RootLayout({
     <html lang="ja">
       <head>
         <AdSense />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "WebSite",
+                  "@id": `${SITE_URL}#website`,
+                  url: SITE_URL,
+                  name: "TCG Authority",
+                  description:
+                    "ワンピカード・ポケカの型番・相場・PSA10倍率・AI鑑定をまとめて確認できる無料ツール",
+                  inLanguage: "ja-JP",
+                  publisher: { "@id": `${SITE_URL}#organization` },
+                  potentialAction: {
+                    "@type": "SearchAction",
+                    target: {
+                      "@type": "EntryPoint",
+                      urlTemplate: `${SITE_URL}/cards?q={search_term_string}`,
+                    },
+                    "query-input": "required name=search_term_string",
+                  },
+                },
+                {
+                  "@type": "Organization",
+                  "@id": `${SITE_URL}#organization`,
+                  name: "TCG Authority",
+                  url: SITE_URL,
+                  logo: {
+                    "@type": "ImageObject",
+                    url: `${SITE_URL}/icon.png`,
+                  },
+                },
+              ],
+            }),
+          }}
+        />
       </head>
       <GoogleAnalytics />
       <body>
@@ -99,7 +137,100 @@ export default function RootLayout({
           </nav>
         </header>
         <main className="max-w-6xl mx-auto px-4 py-8">{children}</main>
+        <SiteFooter />
       </body>
     </html>
+  );
+}
+
+/**
+ * SEO リッチフッター。クローラーが各カテゴリへ辿れるよう、
+ * 主要ランキング・ブランド・セット (人気順) ・ガイド記事への
+ * テキストリンクを大量に張る。
+ */
+function SiteFooter() {
+  // 主要ポケカ弾 (新しい順、過去2年範囲)
+  const popularPokemon = [
+    "M04", "M03", "M02A", "M02", "M01L", "M01S",
+    "SV11W", "SV11B", "SV10", "SV9A", "SV9",
+    "SV8B", "SV8A", "SV8", "SV7P", "SV7A", "SV7", "SV6A", "SV6",
+  ];
+  const popularOnepiece = [
+    "OP15", "OP14", "OP13", "OP12", "OP11", "OP10",
+    "EB04", "EB03", "EB02", "PRB02", "PRB01",
+    "ST30", "ST29", "ST22",
+  ];
+
+  return (
+    <footer className="bg-gray-900 text-gray-300 mt-16">
+      <div className="max-w-6xl mx-auto px-4 py-10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 text-xs">
+          <div>
+            <h3 className="font-bold text-white mb-3 text-sm">価格DB</h3>
+            <ul className="space-y-1.5">
+              <li><a href="/cards" className="hover:text-blue-300">価格DB トップ</a></li>
+              <li><a href="/cards/onepiece" className="hover:text-blue-300">ワンピカード DB</a></li>
+              <li><a href="/cards/pokemon" className="hover:text-blue-300">ポケモンカード DB</a></li>
+              <li><a href="/trending" className="hover:text-blue-300">値上がりランキング</a></li>
+              <li><a href="/trending/psa10" className="hover:text-blue-300">PSA10 高額TOP</a></li>
+              <li><a href="/trending/spread" className="hover:text-blue-300">Raw→PSA10 倍率TOP</a></li>
+              <li><a href="/trending/raw" className="hover:text-blue-300">Raw 高額TOP</a></li>
+              <li><a href="/weekly" className="hover:text-blue-300">週次 値上がりレポート</a></li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-bold text-white mb-3 text-sm">ポケカ 主要弾</h3>
+            <ul className="space-y-1.5">
+              {popularPokemon.map((s) => (
+                <li key={s}>
+                  <a href={`/cards/pokemon/${s}`} className="hover:text-yellow-300 font-mono">
+                    {s}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-bold text-white mb-3 text-sm">ワンピ 主要弾</h3>
+            <ul className="space-y-1.5">
+              {popularOnepiece.map((s) => (
+                <li key={s}>
+                  <a href={`/cards/onepiece/${s}`} className="hover:text-orange-300 font-mono">
+                    {s}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-bold text-white mb-3 text-sm">ガイド・ツール</h3>
+            <ul className="space-y-1.5">
+              <li><a href="/" className="hover:text-blue-300">AI鑑定 (表裏チェック)</a></li>
+              <li><a href="/guide" className="hover:text-blue-300">使い方ガイド</a></li>
+              <li><a href="/history" className="hover:text-blue-300">鑑定履歴</a></li>
+            </ul>
+            <h3 className="font-bold text-white mt-5 mb-3 text-sm">用途</h3>
+            <ul className="space-y-1.5 text-gray-400">
+              <li>フリマ購入前のチェック</li>
+              <li>PSA / BGS 提出前のセルフ鑑定</li>
+              <li>カード仕入れ判断・利幅計算</li>
+              <li>コレクション資産価値把握</li>
+            </ul>
+          </div>
+        </div>
+        <div className="mt-8 pt-6 border-t border-gray-800 flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-[11px] text-gray-500">
+          <div>
+            © TCG Authority — ワンピカード・ポケカの相場と AI 鑑定。
+            ポケットモンスター・ポケモン・Pokémon は任天堂・クリーチャーズ・ゲームフリークの商標です。
+            ONE PIECE および関連標章はバンダイ／集英社の商標です。本サイトは公式サイトではありません。
+          </div>
+          <div className="flex gap-3">
+            <a href="/cards" className="hover:text-gray-300">価格DB</a>
+            <a href="/trending" className="hover:text-gray-300">値上がり</a>
+            <a href="/guide" className="hover:text-gray-300">使い方</a>
+          </div>
+        </div>
+      </div>
+    </footer>
   );
 }

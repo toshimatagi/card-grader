@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { sbGet } from "../lib/supabase";
 import { POKEMON_SETS } from "../lib/pokemonSets";
 import { ONEPIECE_SETS } from "../lib/onepieceSets";
+import { recentWeekSlugs } from "../lib/weeks";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
 
@@ -44,6 +45,12 @@ export default async function sitemap({
       { url: `${SITE_URL}/trending/raw`, changeFrequency: "daily", priority: 0.7 },
       { url: `${SITE_URL}/trending/raw?brand=pokemon`, changeFrequency: "daily", priority: 0.7 },
       { url: `${SITE_URL}/trending/raw?brand=onepiece`, changeFrequency: "daily", priority: 0.7 },
+      { url: `${SITE_URL}/weekly`, changeFrequency: "weekly", priority: 0.7 },
+      ...recentWeekSlugs(12).map((slug) => ({
+        url: `${SITE_URL}/weekly/${slug}`,
+        changeFrequency: "weekly" as const,
+        priority: 0.6,
+      })),
       { url: `${SITE_URL}/guide`, changeFrequency: "monthly", priority: 0.5 },
       { url: `${SITE_URL}/history`, changeFrequency: "monthly", priority: 0.3 },
     ];
