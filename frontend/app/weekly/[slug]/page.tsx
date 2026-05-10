@@ -14,6 +14,7 @@ import {
   currentWeekSlug,
   formatWeekSlug,
 } from "../../../lib/weeks";
+import ShareButtons from "../../../components/share/ShareButtons";
 
 export const revalidate = 3600; // 1h ISR
 
@@ -136,6 +137,12 @@ export default async function WeeklyReport({
             </span>
           )}
         </h1>
+        <ShareButtons
+          url={`${SITE_URL}/weekly/${slug}`}
+          text={`${range} 週次 値上がりレポート — ワンピ・ポケカ`}
+          className="mb-3"
+          compact
+        />
         <p className="text-sm text-gray-700 leading-relaxed">
           ワンピース・ポケモンカードの直近1週間 (
           {range}) で

@@ -12,3 +12,28 @@ body {
   background: var(--background);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
+
+/* Core Web Vitals 改善: CLS 防止
+ * TCG カード画像はアスペクト比 ~63:88 (= 5:7)。w-X h-auto で読み込み中に
+ * 高さが不定になり layout shift が発生するため、img 要素に明示的な
+ * aspect-ratio を指定して画像読み込み前に空間を確保する。
+ *
+ * 既存の <img className="w-X h-auto ..."> 全てに適用される。
+ * (TCG 画像以外で h-auto を使うケースは稀なので妥当)
+ */
+img.h-auto {
+  aspect-ratio: 5 / 7;
+  object-fit: contain;
+}
+
+/* タップターゲット: モバイルでのリンク間隔を確保 (a11y / mobile UX) */
+@media (max-width: 640px) {
+  /* Header 内のリンクは最低 40px の高さを確保 */
+  header nav a,
+  header nav summary,
+  header nav button {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+  }
+}

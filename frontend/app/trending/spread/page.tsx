@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { listSpreadRanking, type SpreadRankingRow } from "../../../lib/api";
+import ShareButtons from "../../../components/share/ShareButtons";
 
 export const revalidate = 1800;
 
@@ -113,6 +114,12 @@ export default async function TrendingSpreadPage({
             ({brand.short})
           </span>
         </h1>
+        <ShareButtons
+          url={`${SITE_URL}/trending/spread${brand.key === "all" ? "" : `?brand=${brand.key}`}`}
+          text={`鑑定で価格が跳ねるカード TOP — Raw → PSA10 倍率ランキング (${brand.short})`}
+          className="mb-3"
+          compact
+        />
         <p className="text-sm text-gray-700 leading-relaxed">
           鑑定で価格が大きく跳ねる「PSA10 提出旨味カード」TOP。Raw (未鑑定) と PSA10 の中央値比から倍率を算出。
           {top1 && (

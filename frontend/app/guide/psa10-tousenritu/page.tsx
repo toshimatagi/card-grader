@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import ShareButtons from "../../../components/share/ShareButtons";
 
 export const revalidate = 86400;
 
@@ -98,9 +99,15 @@ export default function GuidePSA10Page() {
       <h1 className="text-3xl font-bold mb-3 leading-tight">
         PSA10 取得率の実態と<br className="sm:hidden" />提出前にチェックすべき5項目
       </h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <p className="text-sm text-gray-500 mb-3">
         2026-05-10 公開 ・ TCG Authority
       </p>
+      <ShareButtons
+        url={`${SITE_URL}/guide/psa10-tousenritu`}
+        text="PSA10 取得率の実態と提出前にチェックすべき5項目"
+        className="mb-6"
+        compact
+      />
 
       <div className="prose prose-sm max-w-none mb-8">
         <p className="text-base leading-relaxed">

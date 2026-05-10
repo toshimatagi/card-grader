@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import ShareButtons from "../../../components/share/ShareButtons";
 
 export const revalidate = 86400;
 
@@ -95,7 +96,13 @@ export default function GuideKanteiTeisyutsu() {
         鑑定提出 完全マニュアル<br className="sm:hidden" />
         <span className="text-xl text-gray-700">PSA / BGS の選び方と提出ステップ</span>
       </h1>
-      <p className="text-sm text-gray-500 mb-6">2026-05-10 公開 ・ TCG Authority</p>
+      <p className="text-sm text-gray-500 mb-3">2026-05-10 公開 ・ TCG Authority</p>
+      <ShareButtons
+        url={`${SITE_URL}/guide/kantei-teisyutsu`}
+        text="鑑定提出 完全マニュアル — PSA / BGS の選び方"
+        className="mb-6"
+        compact
+      />
 
       <div className="prose prose-sm max-w-none mb-8">
         <p className="text-base leading-relaxed">

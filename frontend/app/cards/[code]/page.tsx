@@ -15,6 +15,7 @@ import {
   type PriceConfidence,
 } from "../../../lib/api";
 import PriceChart from "../../../components/cards/PriceChart";
+import ShareButtons from "../../../components/share/ShareButtons";
 import { getPokemonSetMeta } from "../../../lib/pokemonSets";
 import { getOnePieceSetMeta } from "../../../lib/onepieceSets";
 
@@ -279,10 +280,16 @@ export default async function CardDetailPage({
         <span>{data.code}</span>
       </nav>
 
-      <h1 className="text-2xl font-bold mb-4">
+      <h1 className="text-2xl font-bold mb-2">
         {data.cards[0].name_ja}
         <span className="text-base text-gray-500 ml-3">{data.code}</span>
       </h1>
+      <ShareButtons
+        url={`${SITE_URL}/cards/${data.code}`}
+        text={`${data.cards[0].name_ja} (${data.code}) の相場・PSA10価格`}
+        className="mb-4"
+        compact
+      />
 
       {/* 高額バリアント警告 (B-3) */}
       {(() => {

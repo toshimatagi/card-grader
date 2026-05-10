@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { listGradeRanking, type GradeRankingRow } from "../../../lib/api";
+import ShareButtons from "../../../components/share/ShareButtons";
 
 export const revalidate = 1800; // 30 min ISR
 
@@ -141,6 +142,12 @@ export default async function TrendingPsa10Page({
             ({brand.short})
           </span>
         </h1>
+        <ShareButtons
+          url={`${SITE_URL}/trending/psa10${brand.key === "all" ? "" : `?brand=${brand.key}`}`}
+          text={`${brand.short}の PSA10 高額カード TOP100 ランキング`}
+          className="mb-3"
+          compact
+        />
         <p className="text-sm text-gray-700 leading-relaxed">
           国内オークション・フリマで売却された PSA10 鑑定カードの相場 (中央値) を高い順にランキング表示。
           {top1 && (
