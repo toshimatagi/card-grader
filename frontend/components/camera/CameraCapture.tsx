@@ -13,12 +13,13 @@ const FRAME_PADDING_RATIO = 0.06; // 画面端からの余白比
 
 // 自動スキャン
 const AUTO_ANALYZE_INTERVAL_MS = 167; // ~6Hz
-const AUTO_STABLE_MS = 700; // この時間連続で OK が続いたら自動撮影
-const AUTO_INITIAL_GRACE_MS = 800; // カメラ起動直後は自動撮影しない
+const AUTO_STABLE_MS = 1500; // この時間連続で OK が続いたら自動撮影 (誤検出防止に長めに)
+const AUTO_INITIAL_GRACE_MS = 1500; // カメラ起動直後は自動撮影しない
 const AUTO_DS_WIDTH = 320; // 解析用ダウンサンプル幅 (px)
-const EDGE_PAD_DS = 3; // 枠端から内側/外側にずらすピクセル (DS座標)
+const EDGE_PAD_DS = 6; // 枠端から内側/外側にずらすピクセル (DS座標)
 const EDGE_SAMPLES = 14; // 各辺のサンプル数
-const EDGE_CONTRAST_THRESHOLD = 18; // 0-255、内側-外側の平均輝度差
+const EDGE_CONTRAST_THRESHOLD = 35; // 0-255、内側-外側の平均輝度差 (低いと背景の模様で誤検出)
+const EDGE_SAMPLE_HIT_RATIO = 0.6; // 各辺で contrast 闾値を超えるサンプルが何割必要か
 
 export default function CameraCapture({
   onCapture,
@@ -651,12 +652,20 @@ function checkFrameAlignment(
     pointAt: (t: number) => { ix: number; iy: number; ox: number; oy: number }
   ): boolean => {
     let total = 0;
+    let hits = 0;
     for (let i = 0; i < EDGE_SAMPLES; i++) {
       const t = (i + 0.5) / EDGE_SAMPLES;
       const { ix, iy, ox, oy } = pointAt(t);
-      total += Math.abs(lum(ix, iy) - lum(ox, oy));
+      const diff = Math.abs(lum(ix, iy) - lum(ox, oy));
+      total += diff;
+      if (diff >= EDGE_CONTRAST_THRESHOLD) hits++;
     }
-    return total / EDGE_SAMPLES >= EDGE_CONTRAST_THRESHOLD;
+    // 平均だけでなく、辺の大半 (60%) のサンプルでコントラストが
+    // しっかり出ていることを要求 (1-2点だけ強い差が出る背景模様で
+    // 誤判定するのを防ぐ)
+    const avgOk = total / EDGE_SAMPLES >= EDGE_CONTRAST_THRESHOLD;
+    const hitOk = hits / EDGE_SAMPLES >= EDGE_SAMPLE_HIT_RATIO;
+    return avgOk && hitOk;
   };
   const top = checkEdge((t) => ({
     ix: fx + fw * t,
