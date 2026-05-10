@@ -56,6 +56,10 @@ export default async function sitemap({
       { url: `${SITE_URL}/guide/kantei-teisyutsu`, changeFrequency: "monthly", priority: 0.75 },
       { url: `${SITE_URL}/guide/mercari-takaku-uru`, changeFrequency: "monthly", priority: 0.7 },
       { url: `${SITE_URL}/history`, changeFrequency: "monthly", priority: 0.3 },
+      { url: `${SITE_URL}/about`, changeFrequency: "monthly", priority: 0.5 },
+      { url: `${SITE_URL}/privacy`, changeFrequency: "yearly", priority: 0.4 },
+      { url: `${SITE_URL}/terms`, changeFrequency: "yearly", priority: 0.4 },
+      { url: `${SITE_URL}/contact`, changeFrequency: "monthly", priority: 0.4 },
     ];
   }
 

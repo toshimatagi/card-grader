@@ -227,10 +227,11 @@ function SiteFooter() {
             ポケットモンスター・ポケモン・Pokémon は任天堂・クリーチャーズ・ゲームフリークの商標です。
             ONE PIECE および関連標章はバンダイ／集英社の商標です。本サイトは公式サイトではありません。
           </div>
-          <div className="flex gap-3">
-            <a href="/cards" className="hover:text-gray-300">価格DB</a>
-            <a href="/trending" className="hover:text-gray-300">値上がり</a>
-            <a href="/guide" className="hover:text-gray-300">使い方</a>
+          <div className="flex flex-wrap gap-3">
+            <a href="/about" className="hover:text-gray-300">サイトについて</a>
+            <a href="/privacy" className="hover:text-gray-300">プライバシー</a>
+            <a href="/terms" className="hover:text-gray-300">利用規約</a>
+            <a href="/contact" className="hover:text-gray-300">お問い合わせ</a>
           </div>
         </div>
       </div>
