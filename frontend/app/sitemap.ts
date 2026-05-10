@@ -1,5 +1,4 @@
 import type { MetadataRoute } from "next";
-import { sbGet } from "../lib/supabase";
 import { POKEMON_SETS } from "../lib/pokemonSets";
 import { ONEPIECE_SETS } from "../lib/onepieceSets";
 import { recentWeekSlugs } from "../lib/weeks";
@@ -13,13 +12,14 @@ export const revalidate = 86400; // 24h
  * - /sitemap.xml (index) が `/sitemap/{id}.xml` 群を束ねる
  * - 静的・セット別ランディング・カード詳細を分離して PostgREST 取得負荷を分散、
  *   かつ Search Console で URL 数を内訳ごとにモニタしやすくする
+ *
+ * cards-onepiece / cards-pokemon は image: タグ付きの XML を生成するため
+ * route handler (app/sitemap/cards-{brand}.xml/route.ts) で別実装している。
  */
 export async function generateSitemaps() {
   return [
     { id: "static" },
     { id: "sets" },
-    { id: "cards-onepiece" },
-    { id: "cards-pokemon" },
   ];
 }
 
@@ -74,37 +74,6 @@ export default async function sitemap({
         changeFrequency: "daily",
         priority: 0.85,
       });
-    }
-    return entries;
-  }
-
-  if (id === "cards-onepiece" || id === "cards-pokemon") {
-    const brand = id === "cards-onepiece" ? "onepiece" : "pokemon";
-    const entries: MetadataRoute.Sitemap = [];
-    try {
-      const PAGE = 1000;
-      const all: { set_code: string; card_no: string }[] = [];
-      for (let offset = 0; ; offset += PAGE) {
-        const chunk = await sbGet<{ set_code: string; card_no: string }[]>(
-          "cards",
-          `brand=eq.${brand}&select=set_code,card_no&order=set_code,card_no&limit=${PAGE}&offset=${offset}`,
-        );
-        all.push(...chunk);
-        if (chunk.length < PAGE) break;
-      }
-      const seen = new Set<string>();
-      for (const c of all) {
-        const code = `${c.set_code}-${c.card_no}`;
-        if (seen.has(code)) continue;
-        seen.add(code);
-        entries.push({
-          url: `${SITE_URL}/cards/${code}`,
-          changeFrequency: "daily",
-          priority: 0.7,
-        });
-      }
-    } catch {
-      // Supabase 疎通失敗時は空で返す (sitemap index は他を残す)
     }
     return entries;
   }
