@@ -207,6 +207,9 @@ function SiteFooter() {
             <ul className="space-y-1.5">
               <li><a href="/" className="hover:text-blue-300">AI鑑定 (表裏チェック)</a></li>
               <li><a href="/guide" className="hover:text-blue-300">使い方ガイド</a></li>
+              <li><a href="/guide/psa10-tousenritu" className="hover:text-blue-300">PSA10 取得率ガイド</a></li>
+              <li><a href="/guide/kantei-teisyutsu" className="hover:text-blue-300">鑑定提出マニュアル</a></li>
+              <li><a href="/guide/mercari-takaku-uru" className="hover:text-blue-300">メルカリ高額売却術</a></li>
               <li><a href="/history" className="hover:text-blue-300">鑑定履歴</a></li>
             </ul>
             <h3 className="font-bold text-white mt-5 mb-3 text-sm">用途</h3>

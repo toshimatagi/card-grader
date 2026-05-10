@@ -36,6 +36,37 @@ export default function GuidePage() {
         </ol>
       </nav>
 
+      {/* 詳細ガイド (個別記事) */}
+      <section className="mb-10 p-5 rounded-xl border-2 border-blue-200 bg-blue-50">
+        <h2 className="font-bold mb-3 text-blue-900">📖 詳細ガイド (個別記事)</h2>
+        <ul className="space-y-2 text-sm">
+          <li>
+            <a href="/guide/psa10-tousenritu" className="text-blue-700 hover:underline font-bold">
+              → PSA10 取得率の実態と提出前にチェックすべき5項目
+            </a>
+            <p className="text-xs text-gray-600 ml-4 mt-0.5">
+              PSA10 が出る確率の現実、阻害要因 (センタリング・コーナー等)、AI 鑑定でのセルフチェック手順
+            </p>
+          </li>
+          <li>
+            <a href="/guide/kantei-teisyutsu" className="text-blue-700 hover:underline font-bold">
+              → 鑑定提出 完全マニュアル — PSA / BGS の選び方
+            </a>
+            <p className="text-xs text-gray-600 ml-4 mt-0.5">
+              海外直送 vs 代行業者、費用・期間、提出ステップ、失敗パターン
+            </p>
+          </li>
+          <li>
+            <a href="/guide/mercari-takaku-uru" className="text-blue-700 hover:underline font-bold">
+              → メルカリでカードを高く売るコツ
+            </a>
+            <p className="text-xs text-gray-600 ml-4 mt-0.5">
+              タイトル・写真・価格設定・出品タイミング・梱包の実践テクニック
+            </p>
+          </li>
+        </ul>
+      </section>
+
       {/* 1. 概要 */}
       <section id="overview" className="mb-10">
         <h2 className="text-xl font-bold mb-3 border-b pb-2">1. TCG Authority とは</h2>
