@@ -13,13 +13,14 @@ const FRAME_PADDING_RATIO = 0.06; // 画面端からの余白比
 
 // 自動スキャン
 const AUTO_ANALYZE_INTERVAL_MS = 167; // ~6Hz
-const AUTO_STABLE_MS = 1500; // この時間連続で OK が続いたら自動撮影 (誤検出防止に長めに)
-const AUTO_INITIAL_GRACE_MS = 1500; // カメラ起動直後は自動撮影しない
+const AUTO_STABLE_MS = 1200; // この時間連続で OK が続いたら自動撮影 (誤検出防止に長めに)
+const AUTO_INITIAL_GRACE_MS = 1000; // カメラ起動直後は自動撮影しない
 const AUTO_DS_WIDTH = 320; // 解析用ダウンサンプル幅 (px)
-const EDGE_PAD_DS = 6; // 枠端から内側/外側にずらすピクセル (DS座標)
+const EDGE_PAD_DS = 5; // 枠端から内側/外側にずらすピクセル (DS座標)
 const EDGE_SAMPLES = 14; // 各辺のサンプル数
-const EDGE_CONTRAST_THRESHOLD = 35; // 0-255、内側-外側の平均輝度差 (低いと背景の模様で誤検出)
-const EDGE_SAMPLE_HIT_RATIO = 0.6; // 各辺で contrast 闾値を超えるサンプルが何割必要か
+const EDGE_CONTRAST_THRESHOLD = 22; // 0-255、内側-外側の平均輝度差
+const EDGE_SAMPLE_HIT_RATIO = 0.35; // 各辺で contrast 闾値を超えるサンプルが何割必要か
+const ALIGNED_EDGE_MIN = 3; // 4辺中いくつ通れば「枠合致」とみなすか (照明ムラ対策で 3/4 に緩和)
 
 export default function CameraCapture({
   onCapture,
@@ -691,5 +692,7 @@ function checkFrameAlignment(
     ox: fx + fw + EDGE_PAD_DS,
     oy: fy + fh * t,
   }));
-  return top && bottom && left && right;
+  // 4辺全て合致は照明ムラに弱い。ALIGNED_EDGE_MIN 辺以上で OK とする (デフォ 3/4)
+  const passed = (top ? 1 : 0) + (bottom ? 1 : 0) + (left ? 1 : 0) + (right ? 1 : 0);
+  return passed >= ALIGNED_EDGE_MIN;
 }
