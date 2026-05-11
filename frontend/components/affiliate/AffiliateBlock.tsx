@@ -17,6 +17,16 @@ type Props = {
   overallGrade: number;
 };
 
+// Amazon アソシエイト ID (タグ)
+// 環境変数で上書き可能。未設定時は placeholder の "tcgauthority-22" を使用。
+const AMAZON_TAG =
+  process.env.NEXT_PUBLIC_AMAZON_ASSOCIATE_TAG || "tcgauthority-22";
+
+/** Amazon 検索リンク with アソシエイトタグ */
+function amazonSearchUrl(keyword: string): string {
+  return `https://www.amazon.co.jp/s?k=${encodeURIComponent(keyword)}&tag=${AMAZON_TAG}`;
+}
+
 // 設定: ASP 加入後にここを編集
 const AFFILIATE_LINKS = {
   // 買取サイト (A8等で取得後置換)
@@ -33,27 +43,23 @@ const AFFILIATE_LINKS = {
     desc: string;
     ctaText: string;
   }>,
-  // Amazon サプライ (Amazon アソシエイト ID 取得後にタグ付け)
+  // Amazon サプライ商品 (3点)
+  // インナースリーブ / スリーブ / ローダー の定番3点
   supply: [
     {
-      name: "Card Saver IV (硬質ホルダー)",
-      url: "https://www.amazon.co.jp/s?k=Card+Saver+IV",
-      desc: "PSA / BGS 提出時の標準ホルダー。鑑定機関への発送で必須",
+      name: "インナースリーブ (ジャストフィット)",
+      url: amazonSearchUrl("TCG インナースリーブ ジャストフィット"),
+      desc: "カード本体に直接被せる薄手スリーブ。指紋・摩擦を防ぐ一次保護",
     },
     {
-      name: "マグネットカードホルダー (35pt)",
-      url: "https://www.amazon.co.jp/s?k=マグネットカードホルダー+35pt",
-      desc: "Raw 高額カードの保管。ホコリ・水濡れから完全保護",
+      name: "オーバースリーブ (キャラクタースリーブ対応)",
+      url: amazonSearchUrl("カードスリーブ オーバー キャラクタースリーブ対応"),
+      desc: "インナーの上から重ねる二重スリーブの外側。デッキ運用・メルカリ発送に",
     },
     {
-      name: "ペニースリーブ + ハードスリーブ",
-      url: "https://www.amazon.co.jp/s?k=ペニースリーブ+ハードスリーブ",
-      desc: "メルカリ発送・PSA提出前の二重保護",
-    },
-    {
-      name: "Ultra Pro オーバースリーブ",
-      url: "https://www.amazon.co.jp/s?k=Ultra+Pro+オーバースリーブ",
-      desc: "プレイ用にも観賞用にも使える定番スリーブ",
+      name: "トップローダー (35pt 〜 130pt)",
+      url: amazonSearchUrl("トップローダー TCG"),
+      desc: "硬質プラスチック。高額カードの折り曲げ・水濡れを完全に防ぐ",
     },
   ],
 };
@@ -61,9 +67,8 @@ const AFFILIATE_LINKS = {
 export default function AffiliateBlock({ overallGrade }: Props) {
   const isHighGrade = overallGrade >= 8.5;
   const hasKaitori = AFFILIATE_LINKS.kaitori.length > 0;
-  const supplyToShow = isHighGrade
-    ? AFFILIATE_LINKS.supply.slice(0, 2) // 高グレードは買取主役、サプライ少なめ
-    : AFFILIATE_LINKS.supply.slice(0, 4); // それ以外はサプライ主役
+  // 3点固定 (インナースリーブ / スリーブ / ローダー)
+  const supplyToShow = AFFILIATE_LINKS.supply;
 
   return (
     <div className="mt-6 space-y-4">
@@ -120,19 +125,21 @@ export default function AffiliateBlock({ overallGrade }: Props) {
         </section>
       )}
 
-      {/* サプライ商品セクション (全カードで表示) */}
+      {/* サプライ商品セクション (全カードで表示) — Amazon アソシエイト */}
       <section className="rounded-lg border bg-white p-4">
         <div className="flex items-baseline justify-between mb-2 flex-wrap gap-2">
           <h3 className="text-base font-bold text-gray-800">
-            🃏 鑑定後の保管・売却で必要なもの
+            🃏 カード保護に必須の定番サプライ
           </h3>
           <span className="text-[10px] text-gray-500 bg-gray-100 border px-1.5 py-0.5 rounded">
             広告
           </span>
         </div>
         <p className="text-xs text-gray-600 mb-3 leading-relaxed">
-          PSA / BGS 鑑定提出やフリマ売却の際、状態維持のために必要な定番アイテム。
-          {isHighGrade && " 高額カードは特に厳重な保管を推奨。"}
+          状態を保ったままフリマ発送・PSA / BGS 提出するには
+          <strong>インナースリーブ + オーバースリーブ + トップローダー</strong>
+          の三重保護が定番。
+          {isHighGrade && " 高額カードは特にしっかり保管推奨。"}
         </p>
         <ul className="space-y-2">
           {supplyToShow.map((s) => (
