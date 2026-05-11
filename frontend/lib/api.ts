@@ -152,7 +152,15 @@ export async function gradeCard(
 export async function getGrade(id: string): Promise<GradeResult> {
   const res = await fetch(`${API_BASE}/api/v1/grade/${id}`);
   if (!res.ok) throw new Error("鑑定結果の取得に失敗しました");
-  return res.json();
+  const raw = await res.json();
+  // API 側のフィールド名 (*_url) を frontend 期待 (*_image / *_images) に正規化
+  // 旧フィールドが存在すればそちら優先、なければ URL 版から map する
+  return {
+    ...raw,
+    card_image: raw.card_image ?? raw.card_image_url ?? "",
+    overlay_images:
+      raw.overlay_images ?? raw.overlay_image_urls ?? {},
+  } as GradeResult;
 }
 
 export async function getHistory(): Promise<{ total: number; items: HistoryItem[] }> {
