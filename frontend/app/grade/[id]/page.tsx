@@ -12,6 +12,7 @@ import {
 } from "../../../lib/api";
 import GradeResultView from "../../../components/result/GradeResultView";
 import GradeCardLinker from "../../../components/result/GradeCardLinker";
+import AffiliateBlock from "../../../components/affiliate/AffiliateBlock";
 
 export const dynamic = "force-dynamic";
 
@@ -131,6 +132,9 @@ export default async function GradePage({
         linkedGradePrices={linkedGradePrices}
         cardCode={cardCode}
       />
+
+      {/* アフィリエイト: 買取 CTA (高グレード時) + Amazon サプライ商品 */}
+      <AffiliateBlock overallGrade={g.overall_grade} />
 
       <div className="mt-8 text-center">
         <a
