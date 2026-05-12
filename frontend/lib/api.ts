@@ -455,11 +455,51 @@ export async function attachLatestPrices(
     else byCard.set(s.card_id, [s]);
   }
 
-  return cards.map((c) => ({
+  // 店舗ベース価格 (price_snapshots) で sell/buy 算出
+  const withStore = cards.map((c) => ({
     ...c,
     sell_price: latestPerSourceAggregate(byCard.get(c.id) ?? [], "sell"),
     buy_price: latestPerSourceAggregate(byCard.get(c.id) ?? [], "buy"),
   }));
+
+  // 店舗 sell_price が無いカードは card_grade_prices_latest の raw 中央値で fallback
+  // (ヤフオク等の Raw 売却価格データ。スウィープで追加した stub カードでも値がつく)
+  const missingIds = withStore
+    .filter((c) => c.sell_price == null)
+    .map((c) => c.id);
+
+  if (missingIds.length > 0) {
+    try {
+      const FALLBACK_CHUNK = 200;
+      const rawMap = new Map<string, number>();
+      for (let i = 0; i < missingIds.length; i += FALLBACK_CHUNK) {
+        const idsChunk = missingIds.slice(i, i + FALLBACK_CHUNK);
+        const rows = await sbGet<
+          { card_id: string; price_median: number | null }[]
+        >(
+          "card_grade_prices_latest",
+          `card_id=in.(${idsChunk.join(",")})` +
+            `&grade=eq.raw` +
+            `&select=card_id,price_median` +
+            `&limit=20000`,
+        );
+        for (const r of rows) {
+          if (r.price_median != null) rawMap.set(r.card_id, r.price_median);
+        }
+      }
+      if (rawMap.size > 0) {
+        return withStore.map((c) =>
+          c.sell_price == null && rawMap.has(c.id)
+            ? { ...c, sell_price: rawMap.get(c.id) ?? null }
+            : c,
+        );
+      }
+    } catch {
+      // card_grade_prices_latest が未作成等 → fallback 不能、無視
+    }
+  }
+
+  return withStore;
 }
 
 export async function listRarities(brand: string = "onepiece"): Promise<string[]> {
