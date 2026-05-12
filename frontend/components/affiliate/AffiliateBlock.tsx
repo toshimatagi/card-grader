@@ -14,7 +14,10 @@ import Link from "next/link";
  */
 
 type Props = {
-  overallGrade: number;
+  /** 鑑定結果ページなど、スコアが既にある場合 (高グレード時に買取CTA表示) */
+  overallGrade?: number;
+  /** 表示コンテキスト: 'result' 鑑定結果ページ / 'top' TOPページ */
+  context?: "result" | "top";
 };
 
 // Amazon アソシエイト ID (タグ)
@@ -64,11 +67,15 @@ const AFFILIATE_LINKS = {
   ],
 };
 
-export default function AffiliateBlock({ overallGrade }: Props) {
+export default function AffiliateBlock({
+  overallGrade = 0,
+  context = "result",
+}: Props) {
   const isHighGrade = overallGrade >= 8.5;
   const hasKaitori = AFFILIATE_LINKS.kaitori.length > 0;
   // 3点固定 (インナースリーブ / スリーブ / ローダー)
   const supplyToShow = AFFILIATE_LINKS.supply;
+  const isTop = context === "top";
 
   return (
     <div className="mt-6 space-y-4">
@@ -129,14 +136,16 @@ export default function AffiliateBlock({ overallGrade }: Props) {
       <section className="rounded-lg border bg-white p-4">
         <div className="flex items-baseline justify-between mb-2 flex-wrap gap-2">
           <h3 className="text-base font-bold text-gray-800">
-            🃏 カード保護に必須の定番サプライ
+            🃏 {isTop ? "鑑定前に揃えておきたい必須サプライ" : "カード保護に必須の定番サプライ"}
           </h3>
           <span className="text-[10px] text-gray-500 bg-gray-100 border px-1.5 py-0.5 rounded">
             広告
           </span>
         </div>
         <p className="text-xs text-gray-600 mb-3 leading-relaxed">
-          状態を保ったままフリマ発送・PSA / BGS 提出するには
+          {isTop
+            ? "鑑定するカードは事前に保護しておくとセンタリング・コーナーの状態が安定します。"
+            : "状態を保ったままフリマ発送・PSA / BGS 提出するには"}
           <strong>インナースリーブ + オーバースリーブ + トップローダー</strong>
           の三重保護が定番。
           {isHighGrade && " 高額カードは特にしっかり保管推奨。"}
