@@ -453,10 +453,13 @@ export default async function CardDetailPage({
         {sortedGrades.length === 0 ? (
           <div className="border border-dashed border-gray-300 rounded p-4 text-sm text-gray-500">
             <p className="mb-2">
-              このカードのグレード別 (Raw / PSA10 / PSA9 等) 相場データはまだ収集中です。
+              このカードのグレード別 (Raw / PSA10 / PSA9 等) の{" "}
+              <strong>ネット取引履歴は見つかりません</strong>でした。
             </p>
             <p className="text-xs">
-              国内オークション・フリマの売却済みデータから日次集計しています。データが揃い次第ここに表示されます。
+              コモン・アンコモン等は個別に PSA / BGS 提出されることがほぼ無く、
+              ネット相場が立ちません。カードショップの<strong>ストレージ</strong>
+              で見つけるのが現実的です。
             </p>
           </div>
         ) : (
@@ -680,7 +683,13 @@ function CardDetailNotes({ cards, cardCode, brandMeta }: { cards: CardVariant[];
               販売中央値は <strong>¥{minSell.toLocaleString()}</strong> 前後で推移しています。
             </>
           ) : (
-            "現在、販売価格の集計データが不足しています。"
+            <>
+              ネット市場 (通販・オークション・フリマ) での
+              <strong>取引履歴が見つかりませんでした</strong>。
+              コモン・アンコモン等の低レアカードは個別出品されにくく、
+              ネット相場が立ちにくい傾向があります。実カードを探す場合は
+              <strong>カードショップのストレージ (在庫箱) でのセルフ検索</strong>を推奨します。
+            </>
           )}
           {maxBuy != null && (
             <>

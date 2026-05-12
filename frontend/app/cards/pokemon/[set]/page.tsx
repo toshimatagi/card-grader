@@ -359,7 +359,7 @@ export default async function PokemonSetPage({
                       </span>
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-400">価格データ準備中</div>
+                    <div className="text-xs text-gray-400">取引履歴なし</div>
                   )}
                 </div>
               </Link>
