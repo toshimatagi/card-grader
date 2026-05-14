@@ -24,14 +24,22 @@ export const POKEMON_SETS: Record<string, PokemonSetMeta> = {
   M03:  { name: "ムニキスゼロ",           releaseDate: "2026-01", series: "MEGA", kind: "拡張" },
   M02A: { name: "MEGAドリームex",         releaseDate: "2025-11", series: "MEGA", kind: "ハイクラス" },
   M02:  { name: "インフェルノX",          releaseDate: "2025-09", series: "MEGA", kind: "拡張" },
+  // 実DB上のキーは M01L / M01S (yuyutei/fullahead タイトル準拠)。M01 / M01B は legacy placeholder。
+  M01L: { name: "メガブレイブ",           releaseDate: "2025-08", series: "MEGA", kind: "拡張" },
+  M01S: { name: "メガシンフォニア",       releaseDate: "2025-08", series: "MEGA", kind: "拡張" },
   M01B: { name: "メガブレイブ",           releaseDate: "2025-08", series: "MEGA", kind: "拡張" },
   M01:  { name: "メガシンフォニア",       releaseDate: "2025-08", series: "MEGA", kind: "拡張" },
 
   // ====================================================================
   // SV (スカーレット&バイオレット) シリーズ (2023/01 - 2025/06)
   // ====================================================================
+  // 実DB上のキーは SV11B / SV11W (yuyutei/fullahead タイトル準拠)。
+  // SV10/SV10A は legacy placeholder のまま残す (既存被リンク保護)。
+  SV11B: { name: "ブラックボルト",        releaseDate: "2025-06", series: "SV", kind: "拡張" },
+  SV11W: { name: "ホワイトフレア",        releaseDate: "2025-06", series: "SV", kind: "拡張" },
   SV10A: { name: "ブラックボルト",        releaseDate: "2025-06", series: "SV", kind: "拡張" },
   SV10:  { name: "ホワイトフレア",        releaseDate: "2025-06", series: "SV", kind: "拡張" },
+  SV9A:  { name: "光輝のキーストーン",    releaseDate: "2025-03", series: "SV", kind: "ハイクラス" },
   SV9:   { name: "ロケット団の栄光",      releaseDate: "2025-04", series: "SV", kind: "拡張" },
   SV8B:  { name: "熱風のアリーナ",        releaseDate: "2025-03", series: "SV", kind: "強化拡張" },
   SV8:   { name: "バトルパートナーズ",    releaseDate: "2025-01", series: "SV", kind: "拡張" },
@@ -54,6 +62,7 @@ export const POKEMON_SETS: Record<string, PokemonSetMeta> = {
   SV2D:  { name: "クレイバースト",        releaseDate: "2023-04", series: "SV", kind: "拡張" },
   SV1V:  { name: "バイオレット ex",       releaseDate: "2023-01", series: "SV", kind: "拡張" },
   SV1S:  { name: "スカーレット ex",       releaseDate: "2023-01", series: "SV", kind: "拡張" },
+  SV1A:  { name: "トリプレットビート",    releaseDate: "2023-03", series: "SV", kind: "スターター" },
 };
 
 /**
