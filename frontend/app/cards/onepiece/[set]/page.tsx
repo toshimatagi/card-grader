@@ -26,6 +26,44 @@ type Group = {
   best_sell: number | null;
 };
 
+// ワンピカードの主要レアリティを高額になりやすい順に並べる
+const ONEPIECE_RARITY_PRIORITY = [
+  "SEC", "P-SEC", "L", "SP", "SR", "P-SR", "P-R", "R", "P-UC", "UC", "P-C", "C", "PROMO", "TR",
+];
+
+function groupByRarity(groups: Group[]): Array<{ rarity: string; cards: Group[] }> {
+  const map = new Map<string, Group[]>();
+  for (const g of groups) {
+    const r = (g.rarities[0] ?? "OTHER").toUpperCase();
+    const list = map.get(r) ?? [];
+    list.push(g);
+    map.set(r, list);
+  }
+  const ordered: Array<{ rarity: string; cards: Group[] }> = [];
+  const knownOrder = new Set(ONEPIECE_RARITY_PRIORITY);
+  for (const r of ONEPIECE_RARITY_PRIORITY) {
+    if (map.has(r)) ordered.push({ rarity: r, cards: map.get(r)! });
+  }
+  for (const [r, cards] of Array.from(map.entries())) {
+    if (!knownOrder.has(r)) ordered.push({ rarity: r, cards });
+  }
+  return ordered;
+}
+
+function getNeighborSets(currentCode: string): { prev: string | null; next: string | null } {
+  const entries = Object.entries(ONEPIECE_SETS)
+    .filter(([c]) => c.toUpperCase() !== currentCode.toUpperCase())
+    .sort((a, b) => a[1].releaseDate.localeCompare(b[1].releaseDate));
+  const meta = ONEPIECE_SETS[currentCode.toUpperCase()];
+  if (!meta) return { prev: null, next: null };
+  const before = entries.filter(([, m]) => m.releaseDate < meta.releaseDate);
+  const after = entries.filter(([, m]) => m.releaseDate > meta.releaseDate);
+  return {
+    prev: before.length ? before[before.length - 1][0] : null,
+    next: after.length ? after[0][0] : null,
+  };
+}
+
 export async function generateStaticParams() {
   return Object.keys(ONEPIECE_SETS).map((set) => ({ set: set.toUpperCase() }));
 }
@@ -138,6 +176,25 @@ export default async function OnePieceSetPage({
     if (setCmp !== 0) return setCmp;
     return a.card_no.localeCompare(b.card_no);
   });
+
+  // レアリティ別ブロック
+  const rarityBlocks = groupByRarity(groups)
+    .map((b) => ({
+      ...b,
+      cards: [...b.cards].sort((a, b) => (b.best_sell ?? 0) - (a.best_sell ?? 0)),
+    }))
+    .filter((b) => b.cards.length > 0);
+  const featuredRarities = ["SEC", "P-SEC", "L", "SP", "SR", "P-SR"];
+  const featuredBlocks = rarityBlocks.filter((b) => featuredRarities.includes(b.rarity));
+
+  const secCount = rarityBlocks.find((b) => b.rarity === "SEC")?.cards.length ?? 0;
+  const lCount = rarityBlocks.find((b) => b.rarity === "L")?.cards.length ?? 0;
+  const spCount = rarityBlocks.find((b) => b.rarity === "SP")?.cards.length ?? 0;
+  const srCount = rarityBlocks.find((b) => b.rarity === "SR")?.cards.length ?? 0;
+
+  const neighbors = getNeighborSets(setCode);
+  const prevMeta = neighbors.prev ? ONEPIECE_SETS[neighbors.prev] : null;
+  const nextMeta = neighbors.next ? ONEPIECE_SETS[neighbors.next] : null;
 
   const setName = meta ? meta.name : setCode;
   const releaseDate = meta?.releaseDate;
@@ -262,14 +319,23 @@ export default async function OnePieceSetPage({
           </span>
         </div>
         <p className="text-sm text-gray-700 leading-relaxed">
-          ONE PIECEカードゲーム「{setName}」({setCode}) の全カード相場・買取価格を一覧表示。
-          {topCards.length > 0 && (
+          ONE PIECEカードゲーム「{setName}」({setCode}) の全カード{groups.length}件の相場・買取価格・PSA10想定価格を一覧表示。
+          {(secCount > 0 || lCount > 0 || spCount > 0 || srCount > 0) && (
             <>
-              現在の最高値は「{topCards[0].name_ja}」¥
-              {topCards[0].best_sell?.toLocaleString()}。
+              {" "}内訳: {secCount > 0 && <>SEC {secCount}枚 / </>}
+              {lCount > 0 && <>L {lCount}枚 / </>}
+              {spCount > 0 && <>SP {spCount}枚 / </>}
+              {srCount > 0 && <>SR {srCount}枚 / </>}
+              他。
             </>
           )}
-          各型番をクリックすると、通常・パラレル・SEC・SR などバリアント別の詳細価格と過去90日の推移グラフを確認できます。
+          {topCards.length > 0 && (
+            <>
+              {" "}現在の最高値は「{topCards[0].name_ja}」¥
+              {topCards[0].best_sell?.toLocaleString()}{topCards[0].rarities[0] ? ` (${topCards[0].rarities[0]})` : ""}。
+            </>
+          )}
+          {" "}各型番をクリックすると、通常・パラレル・SEC・SR などバリアント別の詳細価格と過去90日の推移グラフを確認できます。フリマ購入・PSA提出前のチェックにご利用ください。
         </p>
       </header>
 
@@ -294,6 +360,55 @@ export default async function OnePieceSetPage({
               </li>
             ))}
           </ol>
+        </section>
+      )}
+
+      {/* レアリティ別ランキング (検索流入用: 「[弾名] SEC一覧」「[弾名] L一覧」) */}
+      {featuredBlocks.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-lg font-bold mb-3">
+            {setCode} レアリティ別 高額ランキング
+          </h2>
+          <div className="space-y-5">
+            {featuredBlocks.map((block) => (
+              <div key={block.rarity} id={`rarity-${block.rarity}`}>
+                <h3 className="text-sm font-bold mb-2 flex items-baseline gap-2">
+                  <span className="px-2 py-0.5 bg-orange-200 text-orange-900 rounded text-xs font-bold">
+                    {block.rarity}
+                  </span>
+                  <span className="text-gray-700">
+                    {setName} {block.rarity} 一覧 ({block.cards.length}枚)
+                  </span>
+                </h3>
+                <ol className="text-xs space-y-1 ml-4">
+                  {block.cards.slice(0, 6).map((g, i) => (
+                    <li key={g.code} className="flex items-baseline gap-2">
+                      <span className="font-mono text-gray-400 w-5">
+                        {i + 1}.
+                      </span>
+                      <Link
+                        href={`/cards/${g.code}`}
+                        className="text-blue-700 hover:underline truncate"
+                      >
+                        {g.name_ja}
+                      </Link>
+                      <span className="text-gray-400 font-mono">{g.code}</span>
+                      {g.best_sell != null && (
+                        <span className="ml-auto tabular-nums text-gray-700 font-medium">
+                          ¥{g.best_sell.toLocaleString()}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+                {block.cards.length > 6 && (
+                  <p className="text-[11px] text-gray-500 ml-9 mt-1">
+                    他 {block.cards.length - 6}枚は下の全カードリストから確認できます。
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
@@ -372,6 +487,49 @@ export default async function OnePieceSetPage({
         </dl>
       </section>
 
+      {/* 前後弾ナビ */}
+      {(prevMeta || nextMeta) && (
+        <section className="mt-8 border-t pt-6">
+          <h2 className="text-lg font-bold mb-3">前後の弾</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {prevMeta && neighbors.prev && (
+              <Link
+                href={`/cards/onepiece/${neighbors.prev}`}
+                className="border rounded p-3 hover:shadow-sm hover:bg-orange-50 transition-colors"
+              >
+                <div className="text-xs text-gray-500 mb-0.5">← 前の弾</div>
+                <div className="text-sm font-bold">
+                  <span className="font-mono text-orange-900 mr-2">
+                    {neighbors.prev}
+                  </span>
+                  {prevMeta.name}
+                </div>
+                <div className="text-[11px] text-gray-500 mt-0.5">
+                  {prevMeta.releaseDate}発売・{prevMeta.kind}
+                </div>
+              </Link>
+            )}
+            {nextMeta && neighbors.next && (
+              <Link
+                href={`/cards/onepiece/${neighbors.next}`}
+                className="border rounded p-3 hover:shadow-sm hover:bg-orange-50 transition-colors sm:text-right"
+              >
+                <div className="text-xs text-gray-500 mb-0.5">次の弾 →</div>
+                <div className="text-sm font-bold">
+                  <span className="font-mono text-orange-900 mr-2">
+                    {neighbors.next}
+                  </span>
+                  {nextMeta.name}
+                </div>
+                <div className="text-[11px] text-gray-500 mt-0.5">
+                  {nextMeta.releaseDate}発売・{nextMeta.kind}
+                </div>
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="mt-8 text-xs text-gray-500 border-t pt-4">
         <h2 className="font-bold mb-2 text-gray-700">関連リンク</h2>
         <div className="flex flex-wrap gap-2">
@@ -386,6 +544,12 @@ export default async function OnePieceSetPage({
             className="px-3 py-1 border rounded hover:bg-gray-50"
           >
             ワンピカード値上がりランキング
+          </Link>
+          <Link
+            href="/trending/psa10?brand=onepiece"
+            className="px-3 py-1 border rounded hover:bg-gray-50"
+          >
+            ワンピカード PSA10価格ランキング
           </Link>
           <Link href="/cards" className="px-3 py-1 border rounded hover:bg-gray-50">
             価格DBランディング
