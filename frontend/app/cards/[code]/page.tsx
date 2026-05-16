@@ -556,7 +556,14 @@ export default async function CardDetailPage({
       </section>
 
       {/* SEO本文セクション (G-3 動的生成テンプレ) */}
-      <CardDetailNotes cards={data.cards} cardCode={data.code} brandMeta={meta} />
+      <CardDetailNotes
+        cards={data.cards}
+        cardCode={data.code}
+        brandMeta={meta}
+        setName={setMeta?.name ?? null}
+        setReleaseDate={setMeta?.releaseDate ?? null}
+        setKind={setMeta && "kind" in setMeta ? setMeta.kind : null}
+      />
 
       {/* 関連カード — 同セット内の前後カード+ランダム数枚 (SEO 内部リンク) */}
       {relatedCards.length > 0 && (
@@ -611,7 +618,21 @@ export default async function CardDetailPage({
   );
 }
 
-function CardDetailNotes({ cards, cardCode, brandMeta }: { cards: CardVariant[]; cardCode: string; brandMeta: BrandMeta }) {
+function CardDetailNotes({
+  cards,
+  cardCode,
+  brandMeta,
+  setName,
+  setReleaseDate,
+  setKind,
+}: {
+  cards: CardVariant[];
+  cardCode: string;
+  brandMeta: BrandMeta;
+  setName: string | null;
+  setReleaseDate: string | null;
+  setKind: string | null;
+}) {
   const sellPrices = cards
     .map((c) => c.sell_price)
     .filter((p): p is number => p != null && p > 0);
@@ -625,6 +646,11 @@ function CardDetailNotes({ cards, cardCode, brandMeta }: { cards: CardVariant[];
     minSell != null && maxSell != null && minSell > 0 ? maxSell / minSell : null;
   const variantCount = cards.length;
   const name = cards[0]?.name_ja ?? "";
+  const rarities = Array.from(
+    new Set(cards.map((c) => c.rarity).filter((r): r is string => !!r)),
+  );
+  const setCode = cards[0]?.set_code ?? "";
+  const cardNo = cards[0]?.card_no ?? "";
 
   // 代表バリアント (販売データありの最初)
   const repStats = cards.find((c) => c.sell_stats)?.sell_stats;
@@ -658,6 +684,41 @@ function CardDetailNotes({ cards, cardCode, brandMeta }: { cards: CardVariant[];
       <h2 className="text-lg font-bold border-b pb-1">
         {name} ({cardCode}) の相場コメント
       </h2>
+
+      {/* セット内コンテキスト (per-card unique text - 重複ペナルティ回避) */}
+      {(setName || rarities.length > 0) && (
+        <div className="p-4 rounded-lg border bg-white">
+          <h3 className="font-semibold text-sm mb-2">📋 カード情報</h3>
+          <p className="text-sm leading-relaxed text-gray-700">
+            <strong>{name}</strong> ({cardCode}) は
+            {setName && (
+              <>
+                {brandMeta.name_ja}
+                {setKind && `「${setKind}」`}
+                <strong>「{setName}」</strong> ({setCode}
+                {setReleaseDate && `、${setReleaseDate}発売`}) 収録の
+              </>
+            )}
+            {rarities.length > 0 && (
+              <>
+                <strong>
+                  {rarities.length === 1
+                    ? `${rarities[0]} レアリティ`
+                    : `${rarities.join(" / ")} の${rarities.length}バリアント`}
+                </strong>
+              </>
+            )}
+            {!setName && "型番"}カード (型番: <span className="font-mono">{cardCode}</span>、
+            セット内番号 <strong>{cardNo}</strong>) です。
+            {variantCount > 1 && (
+              <>
+                {" "}本ページでは {variantCount} バリアントの販売・買取相場、
+                90日推移、PSA10/PSA9/Raw のグレード別中央値を一覧できます。
+              </>
+            )}
+          </p>
+        </div>
+      )}
 
       {/* 相場コメント */}
       <div className="p-4 rounded-lg border bg-white">
