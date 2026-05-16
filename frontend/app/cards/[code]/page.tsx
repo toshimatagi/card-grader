@@ -16,8 +16,10 @@ import {
 } from "../../../lib/api";
 import PriceChart from "../../../components/cards/PriceChart";
 import ShareButtons from "../../../components/share/ShareButtons";
+import AddToCollection from "../../../components/collection/AddToCollection";
 import { getPokemonSetMeta } from "../../../lib/pokemonSets";
 import { getOnePieceSetMeta } from "../../../lib/onepieceSets";
+import { createSupabaseServerClient } from "../../../lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +52,30 @@ const BRAND_META: Record<string, BrandMeta> = {
 
 function getBrandMeta(brand: string | undefined): BrandMeta {
   return BRAND_META[brand ?? "onepiece"] ?? BRAND_META.onepiece;
+}
+
+async function getCollectionState(
+  cardId: string,
+): Promise<{ authEnabled: boolean; loggedIn: boolean; quantity: number }> {
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    return { authEnabled: false, loggedIn: false, quantity: 0 };
+  }
+  try {
+    const supabase = createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { authEnabled: true, loggedIn: false, quantity: 0 };
+    const { data } = await supabase
+      .from("user_collections")
+      .select("quantity")
+      .eq("card_id", cardId)
+      .maybeSingle();
+    return { authEnabled: true, loggedIn: true, quantity: data?.quantity ?? 0 };
+  } catch {
+    return { authEnabled: true, loggedIn: false, quantity: 0 };
+  }
 }
 
 export async function generateMetadata({
@@ -167,13 +193,14 @@ export default async function CardDetailPage({
   const meta = getBrandMeta(data.cards[0]?.brand);
 
   const firstCard = data.cards[0];
-  const [relatedCards, gradePrices] = await Promise.all([
+  const [relatedCards, gradePrices, collectionState] = await Promise.all([
     listRelatedCards(firstCard.set_code, firstCard.card_no, 8).catch(
       () => [] as CardSummary[],
     ),
     listGradePrices(data.cards.map((c) => c.id)).catch(
       () => [] as CardGradePrice[],
     ),
+    getCollectionState(firstCard.id),
   ]);
 
   // variant 横断で grade 別の最高サンプルを集約 (variant 毎にデータが薄いため)
@@ -287,9 +314,18 @@ export default async function CardDetailPage({
       <ShareButtons
         url={`${SITE_URL}/cards/${data.code}`}
         text={`${data.cards[0].name_ja} (${data.code}) の相場・PSA10価格`}
-        className="mb-4"
+        className="mb-3"
         compact
       />
+      {collectionState.authEnabled && (
+        <div className="mb-4">
+          <AddToCollection
+            cardId={firstCard.id}
+            cardCode={data.code}
+            initialState={collectionState}
+          />
+        </div>
+      )}
 
       {/* 高額バリアント警告 (B-3) */}
       {(() => {
