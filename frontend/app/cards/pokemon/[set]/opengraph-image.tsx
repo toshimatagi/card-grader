@@ -16,6 +16,9 @@ export default async function Image({
   const setName = meta?.name ?? setCode;
   const releaseDate = meta?.releaseDate ?? "";
   const kind = meta?.kind ?? "";
+  const metaLine = [releaseDate ? `${releaseDate} 発売` : "", kind]
+    .filter(Boolean)
+    .join("  ・  ");
 
   return new ImageResponse(
     (
@@ -70,9 +73,7 @@ export default async function Image({
               color: "#374151",
             }}
           >
-            {releaseDate && `${releaseDate} 発売`}
-            {releaseDate && kind && "  ・  "}
-            {kind && kind}
+            {metaLine}
           </div>
         </div>
         <div

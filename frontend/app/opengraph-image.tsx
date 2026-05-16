@@ -42,11 +42,13 @@ export default function Image() {
             lineHeight: 1.15,
             textAlign: "center",
             marginBottom: 28,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
           }}
         >
-          ワンピカード・ポケカの
-          <br />
-          相場 &amp; AI 鑑定
+          <span>ワンピカード・ポケカの</span>
+          <span>相場 &amp; AI 鑑定</span>
         </div>
         <div
           style={{
