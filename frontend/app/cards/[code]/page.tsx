@@ -54,27 +54,42 @@ function getBrandMeta(brand: string | undefined): BrandMeta {
   return BRAND_META[brand ?? "onepiece"] ?? BRAND_META.onepiece;
 }
 
+type CollectionState = {
+  authEnabled: boolean;
+  loggedIn: boolean;
+  // card_id → そのカード×grade ごとの保有エントリ一覧
+  perCard: Record<string, { quantity: number; grade: string }[]>;
+};
+
 async function getCollectionState(
-  cardId: string,
-): Promise<{ authEnabled: boolean; loggedIn: boolean; quantity: number }> {
+  cardIds: string[],
+): Promise<CollectionState> {
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
     !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   ) {
-    return { authEnabled: false, loggedIn: false, quantity: 0 };
+    return { authEnabled: false, loggedIn: false, perCard: {} };
   }
   try {
     const supabase = createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { authEnabled: true, loggedIn: false, quantity: 0 };
+    if (!user) return { authEnabled: true, loggedIn: false, perCard: {} };
+    if (cardIds.length === 0) return { authEnabled: true, loggedIn: true, perCard: {} };
     const { data } = await supabase
       .from("user_collections")
-      .select("quantity")
-      .eq("card_id", cardId)
-      .maybeSingle();
-    return { authEnabled: true, loggedIn: true, quantity: data?.quantity ?? 0 };
+      .select("card_id,quantity,grade")
+      .in("card_id", cardIds);
+    const perCard: CollectionState["perCard"] = {};
+    for (const row of data ?? []) {
+      const k = row.card_id as string;
+      (perCard[k] ??= []).push({
+        quantity: row.quantity as number,
+        grade: row.grade as string,
+      });
+    }
+    return { authEnabled: true, loggedIn: true, perCard };
   } catch {
-    return { authEnabled: true, loggedIn: false, quantity: 0 };
+    return { authEnabled: true, loggedIn: false, perCard: {} };
   }
 }
 
@@ -200,7 +215,7 @@ export default async function CardDetailPage({
     listGradePrices(data.cards.map((c) => c.id)).catch(
       () => [] as CardGradePrice[],
     ),
-    getCollectionState(firstCard.id),
+    getCollectionState(data.cards.map((c) => c.id)),
   ]);
 
   // variant 横断で grade 別の最高サンプルを集約 (variant 毎にデータが薄いため)
@@ -317,14 +332,21 @@ export default async function CardDetailPage({
         className="mb-3"
         compact
       />
-      {collectionState.authEnabled && (
+      {collectionState.authEnabled && data.cards.length === 1 && (
         <div className="mb-4">
           <AddToCollection
             cardId={firstCard.id}
-            cardCode={data.code}
-            initialState={collectionState}
+            authEnabled={collectionState.authEnabled}
+            loggedIn={collectionState.loggedIn}
+            existing={(collectionState.perCard[firstCard.id] ?? []) as any}
+            variantLabel={`${VARIANT_LABEL[firstCard.variant] ?? firstCard.variant} ${firstCard.rarity}`}
           />
         </div>
+      )}
+      {collectionState.authEnabled && data.cards.length > 1 && (
+        <p className="text-xs text-gray-500 mb-4">
+          📚 コレクションに追加するには下の「バリアント別 価格」表の各行から選択してください。
+        </p>
       )}
 
       {/* 高額バリアント警告 (B-3) */}
@@ -370,6 +392,9 @@ export default async function CardDetailPage({
                   <th className="p-2 border-b text-right">買取 (中央値)</th>
                   <th className="p-2 border-b text-right">買取率</th>
                   <th className="p-2 border-b">信頼度</th>
+                  {collectionState.authEnabled && (
+                    <th className="p-2 border-b">コレクション</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -447,6 +472,18 @@ export default async function CardDetailPage({
                       <td className="p-2">
                         {conf ? <ConfidenceBadge confidence={conf} /> : "-"}
                       </td>
+                      {collectionState.authEnabled && (
+                        <td className="p-2">
+                          <AddToCollection
+                            cardId={c.id}
+                            variantLabel={`${VARIANT_LABEL[c.variant] ?? c.variant} ${c.rarity}`}
+                            authEnabled={collectionState.authEnabled}
+                            loggedIn={collectionState.loggedIn}
+                            existing={(collectionState.perCard[c.id] ?? []) as any}
+                            compact
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

@@ -13,6 +13,8 @@ import {
 import GradeResultView from "../../../components/result/GradeResultView";
 import GradeCardLinker from "../../../components/result/GradeCardLinker";
 import AffiliateBlock from "../../../components/affiliate/AffiliateBlock";
+import AddToCollection from "../../../components/collection/AddToCollection";
+import { createSupabaseServerClient } from "../../../lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +87,7 @@ export default async function GradePage({
   const cardCode = sp.card?.trim().toUpperCase() ?? null;
   let linkedCard: {
     code: string;
+    card_id: string;       // 代表 variant の uuid (コレクション追加用)
     name_ja: string;
     image_url: string | null;
     set_code: string;
@@ -92,6 +95,8 @@ export default async function GradePage({
     brand: string;
   } | null = null;
   let linkedGradePrices: CardGradePrice[] = [];
+  let linkedCollectionExisting: { quantity: number; grade: string }[] = [];
+  let linkedLoggedIn = false;
 
   if (cardCode && /^[A-Z]+\d+[A-Z]?-\d{1,3}$/.test(cardCode)) {
     try {
@@ -100,6 +105,7 @@ export default async function GradePage({
         const c0 = data.cards[0];
         linkedCard = {
           code: data.code,
+          card_id: c0.id,
           name_ja: c0.name_ja,
           image_url: c0.image_url,
           set_code: c0.set_code,
@@ -109,6 +115,28 @@ export default async function GradePage({
         linkedGradePrices = await listGradePrices(
           data.cards.map((c) => c.id),
         ).catch(() => [] as CardGradePrice[]);
+
+        // ログイン中なら自分のコレクション保有状況を取得
+        if (
+          process.env.NEXT_PUBLIC_SUPABASE_URL &&
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        ) {
+          try {
+            const supabase = createSupabaseServerClient();
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              linkedLoggedIn = true;
+              const { data: rows } = await supabase
+                .from("user_collections")
+                .select("quantity,grade")
+                .eq("card_id", c0.id);
+              linkedCollectionExisting = (rows ?? []).map((r) => ({
+                quantity: r.quantity as number,
+                grade: r.grade as string,
+              }));
+            }
+          } catch {}
+        }
       }
     } catch {
       // not found, ignore — UI will offer search again
@@ -131,6 +159,12 @@ export default async function GradePage({
         linkedCard={linkedCard}
         linkedGradePrices={linkedGradePrices}
         cardCode={cardCode}
+        linkedCollectionExisting={linkedCollectionExisting}
+        linkedLoggedIn={linkedLoggedIn}
+        authEnabled={
+          !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
+          !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        }
       />
 
       {/* アフィリエイト: 買取 CTA (高グレード時) + Amazon サプライ商品 */}
@@ -159,11 +193,15 @@ function EstimatedGradeAndPrice({
   linkedCard,
   linkedGradePrices,
   cardCode,
+  linkedCollectionExisting,
+  linkedLoggedIn,
+  authEnabled,
 }: {
   overallGrade: number;
   confidence: number;
   linkedCard: {
     code: string;
+    card_id: string;
     name_ja: string;
     image_url: string | null;
     set_code: string;
@@ -172,6 +210,9 @@ function EstimatedGradeAndPrice({
   } | null;
   linkedGradePrices: CardGradePrice[];
   cardCode: string | null;
+  linkedCollectionExisting: { quantity: number; grade: string }[];
+  linkedLoggedIn: boolean;
+  authEnabled: boolean;
 }) {
   // overall_grade から PSA 等価グレードを推定
   let estimatedGrade: CardGrade = "raw";
@@ -346,6 +387,33 @@ function EstimatedGradeAndPrice({
                 </div>
               )}
             </>
+          )}
+
+          {/* 鑑定結果 → コレクション登録の動線 */}
+          {authEnabled && (
+            <div className="mt-4 p-3 rounded border-2 border-blue-200 bg-blue-50">
+              <div className="text-sm font-bold text-blue-900 mb-2">
+                📚 このカードをマイコレクションに登録
+              </div>
+              <p className="text-[11px] text-blue-800 leading-relaxed mb-2">
+                {linkedLoggedIn ? (
+                  <>
+                    AI鑑定スコアから推定された <strong>{GRADE_LABEL[estimatedGrade]}</strong> を
+                    デフォルトで選択しています。実際の鑑定結果に応じて変更してください。
+                  </>
+                ) : (
+                  <>Googleログインすると、このカードを自分の保有リストに登録できます。</>
+                )}
+              </p>
+              <AddToCollection
+                cardId={linkedCard.card_id}
+                variantLabel={linkedCard.name_ja}
+                authEnabled={true}
+                loggedIn={linkedLoggedIn}
+                existing={linkedCollectionExisting as any}
+                defaultGrade={estimatedGrade as any}
+              />
+            </div>
           )}
 
           <div className="mt-3 flex flex-wrap gap-2 text-xs">

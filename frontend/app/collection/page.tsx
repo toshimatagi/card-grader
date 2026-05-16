@@ -2,6 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "../../lib/supabase/server";
 import { sbGet } from "../../lib/supabase";
+import {
+  attachLatestPrices,
+  type CardSummary,
+  type CardSummaryWithPrice,
+} from "../../lib/api";
 import RemoveButtonClient from "../../components/collection/RemoveButtonClient";
 
 export const dynamic = "force-dynamic";
@@ -16,21 +21,38 @@ type CollectionRow = {
   id: string;
   card_id: string;
   quantity: number;
+  grade: string;
   condition_note: string | null;
   acquired_price: number | null;
   added_at: string;
 };
 
-type CardRow = {
-  id: string;
-  set_code: string;
-  card_no: string;
-  name_ja: string;
-  rarity: string | null;
-  image_url: string | null;
-  sell_price: number | null;
-  buy_price: number | null;
-  brand: string;
+const GRADE_LABEL: Record<string, string> = {
+  unspecified: "未指定",
+  raw: "Raw",
+  psa10: "PSA 10",
+  psa9: "PSA 9",
+  psa8: "PSA 8",
+  psa7: "PSA 7",
+  bgs10: "BGS 10",
+  bgs9_5: "BGS 9.5",
+  bgs9: "BGS 9",
+  bgs8_5: "BGS 8.5",
+  ars10: "ARS 10",
+  ars9: "ARS 9",
+  sgc10: "SGC 10",
+  sgc9_5: "SGC 9.5",
+  sgc9: "SGC 9",
+};
+
+const GRADE_BG: Record<string, string> = {
+  psa10: "bg-amber-200 text-amber-900",
+  psa9: "bg-yellow-100 text-yellow-900",
+  psa8: "bg-yellow-50 text-yellow-800",
+  bgs10: "bg-purple-200 text-purple-900",
+  bgs9_5: "bg-purple-100 text-purple-900",
+  raw: "bg-gray-100 text-gray-700",
+  unspecified: "bg-gray-50 text-gray-500",
 };
 
 export default async function CollectionPage() {
@@ -43,36 +65,68 @@ export default async function CollectionPage() {
   // RLS により自分の行のみ返る
   const { data: rows } = await supabase
     .from("user_collections")
-    .select("id,card_id,quantity,condition_note,acquired_price,added_at")
+    .select("id,card_id,quantity,grade,condition_note,acquired_price,added_at")
     .order("added_at", { ascending: false });
 
   const collectionRows: CollectionRow[] = rows ?? [];
 
-  // card_id → card 詳細を一括取得 (SERVICE_KEY 経由 = price データ含む)
-  const cardIds = collectionRows.map((r) => r.card_id);
-  let cards: CardRow[] = [];
+  // card_id → card 情報を取得 (cards テーブルは価格カラム持たない)
+  const cardIds = Array.from(new Set(collectionRows.map((r) => r.card_id)));
+  let cardMap = new Map<string, CardSummaryWithPrice>();
+  // grade 別価格: (card_id, grade) → median
+  const gradePriceMap = new Map<string, number>();
   if (cardIds.length > 0) {
     try {
-      cards = await sbGet<CardRow[]>(
+      const baseCards = await sbGet<CardSummary[]>(
         "cards",
-        `select=id,set_code,card_no,name_ja,rarity,image_url,sell_price,buy_price,brand&id=in.(${cardIds.join(",")})`,
+        `select=id,brand,set_code,card_no,variant,rarity,name_ja,image_url&id=in.(${cardIds.join(",")})`,
       );
+      // 店舗価格 (price_snapshots → Raw fallback)
+      const withPrice = await attachLatestPrices(baseCards);
+      cardMap = new Map(withPrice.map((c) => [c.id, c]));
+      // PSA/BGS の grade 別中央値を card_grade_prices_latest から
+      const gradeRows = await sbGet<
+        { card_id: string; grade: string; price_median: number | null }[]
+      >(
+        "card_grade_prices_latest",
+        `card_id=in.(${cardIds.join(",")})&select=card_id,grade,price_median`,
+      );
+      for (const r of gradeRows) {
+        if (r.price_median != null) {
+          gradePriceMap.set(`${r.card_id}:${r.grade}`, r.price_median);
+        }
+      }
     } catch {
-      cards = [];
+      cardMap = new Map();
     }
   }
-  const cardMap = new Map(cards.map((c) => [c.id, c]));
+
+  // grade を card_grade_prices_latest のキーに変換 (raw 以外は同名で OK)
+  // card_grade_prices_latest 側のキー: 'raw', 'psa10', 'psa9', 'psa8', 'bgs10', 'bgs9_5' 等
+  function priceForGrade(cardId: string, grade: string, fallbackSell: number | null): number | null {
+    if (grade === "unspecified") return fallbackSell;
+    if (grade === "raw") {
+      const g = gradePriceMap.get(`${cardId}:raw`);
+      return g ?? fallbackSell;
+    }
+    return gradePriceMap.get(`${cardId}:${grade}`) ?? fallbackSell;
+  }
 
   // 集計
   let totalSell = 0;
   let totalAcquired = 0;
   let totalQuantity = 0;
+  let valuedQuantity = 0; // sell_price がついた枚数 (評価額算出ベース)
   for (const r of collectionRows) {
     const c = cardMap.get(r.card_id);
     if (!c) continue;
     totalQuantity += r.quantity;
-    if (c.sell_price) totalSell += c.sell_price * r.quantity;
-    if (r.acquired_price) totalAcquired += r.acquired_price * r.quantity;
+    const p = priceForGrade(r.card_id, r.grade, c.sell_price);
+    if (p != null) {
+      totalSell += p * r.quantity;
+      valuedQuantity += r.quantity;
+    }
+    if (r.acquired_price != null) totalAcquired += r.acquired_price * r.quantity;
   }
   const unrealized = totalAcquired > 0 ? totalSell - totalAcquired : null;
 
@@ -81,7 +135,7 @@ export default async function CollectionPage() {
       <header className="mb-6">
         <h1 className="text-2xl font-bold mb-1">📚 マイコレクション</h1>
         <p className="text-xs text-gray-500">
-          あなたが保有しているカードと資産評価額。価格は最新の販売中央値ベース。
+          あなたが保有しているカードと資産評価額。価格は直近1週間の販売中央値ベース、データがないものは Raw 中央値で補完。
         </p>
       </header>
 
@@ -89,8 +143,13 @@ export default async function CollectionPage() {
         <Stat label="登録カード" value={`${collectionRows.length}種`} />
         <Stat label="合計枚数" value={`${totalQuantity}枚`} />
         <Stat
-          label="評価額 (販売中央値)"
+          label="評価額"
           value={totalSell > 0 ? `¥${totalSell.toLocaleString()}` : "-"}
+          sub={
+            valuedQuantity < totalQuantity
+              ? `${valuedQuantity}/${totalQuantity}枚分`
+              : undefined
+          }
         />
         <Stat
           label="含み損益"
@@ -99,7 +158,13 @@ export default async function CollectionPage() {
               ? `${unrealized >= 0 ? "+" : "-"}¥${Math.abs(unrealized).toLocaleString()}`
               : "-"
           }
-          highlight={unrealized != null && unrealized >= 0 ? "good" : unrealized != null ? "bad" : undefined}
+          highlight={
+            unrealized != null && unrealized >= 0
+              ? "good"
+              : unrealized != null
+                ? "bad"
+                : undefined
+          }
         />
       </section>
 
@@ -121,9 +186,17 @@ export default async function CollectionPage() {
           {collectionRows.map((r) => {
             const c = cardMap.get(r.card_id);
             const code = c ? `${c.set_code}-${c.card_no}` : "削除済";
+            const unitPrice = c
+              ? priceForGrade(r.card_id, r.grade, c.sell_price)
+              : null;
             const acquiredTotal = r.acquired_price ? r.acquired_price * r.quantity : null;
-            const sellTotal = c?.sell_price ? c.sell_price * r.quantity : null;
-            const diff = acquiredTotal != null && sellTotal != null ? sellTotal - acquiredTotal : null;
+            const sellTotal = unitPrice != null ? unitPrice * r.quantity : null;
+            const diff =
+              acquiredTotal != null && sellTotal != null
+                ? sellTotal - acquiredTotal
+                : null;
+            const gradeLabel = GRADE_LABEL[r.grade] ?? r.grade;
+            const gradeBg = GRADE_BG[r.grade] ?? "bg-gray-50 text-gray-600";
             return (
               <li key={r.id} className="p-3 flex items-center gap-3">
                 {c?.image_url ? (
@@ -145,9 +218,21 @@ export default async function CollectionPage() {
                   >
                     {c?.name_ja ?? "(カード情報なし)"}
                   </Link>
-                  <div className="text-xs text-gray-500 mt-0.5 flex gap-2">
+                  <div className="text-xs text-gray-500 mt-0.5 flex gap-2 flex-wrap items-center">
                     <span className="font-mono">{code}</span>
-                    {c?.rarity && <span>{c.rarity}</span>}
+                    {c?.rarity && (
+                      <span className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] font-bold text-gray-700">
+                        {c.rarity}
+                      </span>
+                    )}
+                    {c?.variant && c.variant !== "normal" && (
+                      <span className="px-1.5 py-0.5 bg-purple-100 rounded text-[10px] text-purple-700">
+                        {c.variant}
+                      </span>
+                    )}
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${gradeBg}`}>
+                      {gradeLabel}
+                    </span>
                     <span>×{r.quantity}</span>
                   </div>
                   {r.condition_note && (
@@ -177,10 +262,12 @@ export default async function CollectionPage() {
 function Stat({
   label,
   value,
+  sub,
   highlight,
 }: {
   label: string;
   value: string;
+  sub?: string;
   highlight?: "good" | "bad";
 }) {
   const cls =
@@ -193,7 +280,7 @@ function Stat({
     <div className="bg-white border rounded-lg p-3">
       <div className="text-[11px] text-gray-500">{label}</div>
       <div className={`text-lg font-bold ${cls}`}>{value}</div>
+      {sub && <div className="text-[10px] text-gray-400 mt-0.5">{sub}</div>}
     </div>
   );
 }
-
