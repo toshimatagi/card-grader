@@ -126,6 +126,37 @@ def aggregate(items: list[dict]) -> Optional[dict]:
     }
 
 
+async def _paginate_get(
+    client: httpx.AsyncClient,
+    url: str,
+    page_size: int = 1000,
+) -> list[dict]:
+    """PostgREST は単一リクエストで 1000 行以上返さない (server-side cap)。
+    Range ヘッダで chunk して全行取得する。
+
+    重要: httpx の `params=` は URL に既存のクエリ文字列を**上書き**してしまうため
+    使えない。クエリは url にすべて埋め込んで渡すこと。"""
+    out: list[dict] = []
+    offset = 0
+    while True:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Range-Unit": "items",
+            "Range": f"{offset}-{offset + page_size - 1}",
+        }
+        r = await client.get(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        chunk = r.json()
+        if not chunk:
+            break
+        out.extend(chunk)
+        if len(chunk) < page_size:
+            break
+        offset += page_size
+    return out
+
+
 async def fetch_cards_to_process(
     client: httpx.AsyncClient,
     brand: str,
@@ -133,69 +164,95 @@ async def fetch_cards_to_process(
     *,
     skip_existing: bool = True,
     skip_within_hours: int = 168,
+    prefer_uncovered: bool = True,
 ) -> list[dict]:
     """rarity != 'UNKNOWN' の代表カード (高レア優先) を取得。
-    skip_existing=True なら直近 skip_within_hours 以内に
-    card_grade_prices に登録済みの card_id を除外する (重複処理回避)。"""
+
+    - skip_existing=True: 直近 skip_within_hours 以内に取得済みの card_id を除外
+    - prefer_uncovered=True: card_grade_prices_latest に1度も登録されていない
+      カード (= true backfill 対象) を優先キューイング。残り枠を recent スキップ
+      後のカードで埋める。
+    """
     high_rarity = [
-        "SAR", "UR", "SR", "SEC", "L", "SP",
+        # 共通 / ポケカ
+        "SAR", "UR", "SR", "SSR", "CHR", "ACE", "HR",
         "AR", "MUR", "RRR", "RR", "RAR",
+        # ワンピ
+        "SEC", "P-SEC", "L", "SP", "P-SR",
     ]
     rarity_filter = "rarity=in.(" + ",".join(high_rarity) + ")"
 
-    # 直近処理済みの card_id を収集して除外
+    # 1. 直近処理済みの card_id を収集 (paginate)
     skip_ids: set[str] = set()
     if skip_existing:
         from datetime import datetime, timezone, timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=skip_within_hours)).isoformat()
         try:
-            r = await client.get(
-                f"{SUPABASE_URL}/rest/v1/card_grade_prices",
-                params={
-                    "select": "card_id",
-                    "captured_at": f"gte.{cutoff}",
-                    "limit": "5000",
-                },
-                headers={
-                    "apikey": SUPABASE_KEY,
-                    "Authorization": f"Bearer {SUPABASE_KEY}",
-                },
-                timeout=15,
+            rows = await _paginate_get(
+                client,
+                f"{SUPABASE_URL}/rest/v1/card_grade_prices"
+                f"?select=card_id&captured_at=gte.{quote_plus(cutoff)}",
             )
-            r.raise_for_status()
-            for row in r.json():
+            for row in rows:
                 skip_ids.add(row["card_id"])
+            print(
+                f"[*] skip-list: {len(skip_ids)} distinct card_ids scraped "
+                f"within last {skip_within_hours}h",
+                file=sys.stderr,
+            )
         except Exception as e:
             print(f"[warn] skip-list fetch failed: {e}", file=sys.stderr)
 
-    # まず多めに取得して skip_ids でフィルタ
-    fetch_limit = limit * 4
-    qs = (
-        f"brand=eq.{brand}"
-        f"&{rarity_filter}"
+    # 2. 過去に1度でも grade_price がある card_id を全件収集 (paginate)
+    covered_ids: set[str] = set()
+    if prefer_uncovered:
+        try:
+            rows = await _paginate_get(
+                client,
+                f"{SUPABASE_URL}/rest/v1/card_grade_prices_latest?select=card_id",
+            )
+            for row in rows:
+                covered_ids.add(row["card_id"])
+            print(
+                f"[*] coverage: {len(covered_ids)} distinct cards have any grade_price",
+                file=sys.stderr,
+            )
+        except Exception as e:
+            print(f"[warn] coverage fetch failed: {e}", file=sys.stderr)
+
+    # 3. 候補カードを多めに取得
+    cards_url = (
+        f"{SUPABASE_URL}/rest/v1/cards?"
+        f"{rarity_filter}"
+        f"&brand=eq.{brand}"
         f"&variant=eq.normal"
         f"&select=id,set_code,card_no,name_ja,rarity"
         f"&order=updated_at.desc"
-        f"&limit={fetch_limit}"
     )
-    r = await client.get(
-        f"{SUPABASE_URL}/rest/v1/cards?{qs}",
-        headers={
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-        },
-        timeout=15,
-    )
-    r.raise_for_status()
-    all_cards = r.json()
-    filtered = [c for c in all_cards if c["id"] not in skip_ids]
+    all_cards = await _paginate_get(client, cards_url)
+
+    # 4. skip_ids 除外
+    remaining = [c for c in all_cards if c["id"] not in skip_ids]
     if skip_ids:
         print(
-            f"[*] skipping {len(all_cards) - len(filtered)} cards already "
-            f"scraped within last {skip_within_hours}h",
+            f"[*] after skip_existing: {len(remaining)}/{len(all_cards)} cards eligible",
             file=sys.stderr,
         )
-    return filtered[:limit]
+
+    # 5. 未カバーカードを優先 (true backfill)
+    if prefer_uncovered:
+        uncovered = [c for c in remaining if c["id"] not in covered_ids]
+        already_covered = [c for c in remaining if c["id"] in covered_ids]
+        ordered = uncovered + already_covered
+        print(
+            f"[*] queue order: {len(uncovered)} uncovered first, "
+            f"then {len(already_covered)} previously-covered",
+            file=sys.stderr,
+        )
+    else:
+        ordered = remaining
+
+    return ordered[:limit]
 
 
 async def upsert_grade_price(
@@ -290,10 +347,26 @@ async def main():
     ap.add_argument("--brand", default="pokemon")
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--delay", type=float, default=4.0)
+    ap.add_argument(
+        "--no-prefer-uncovered",
+        action="store_true",
+        help="未カバーカード優先化を無効化 (recent refresh mode)",
+    )
+    ap.add_argument(
+        "--no-skip-existing",
+        action="store_true",
+        help="直近7日 skip も無効化 (フル再スクレイプ用)",
+    )
     args = ap.parse_args()
 
     async with httpx.AsyncClient() as client:
-        cards = await fetch_cards_to_process(client, args.brand, args.limit)
+        cards = await fetch_cards_to_process(
+            client,
+            args.brand,
+            args.limit,
+            skip_existing=not args.no_skip_existing,
+            prefer_uncovered=not args.no_prefer_uncovered,
+        )
         print(f"[*] processing {len(cards)} cards (high rarity, brand={args.brand})",
               file=sys.stderr)
 

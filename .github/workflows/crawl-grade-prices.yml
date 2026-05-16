@@ -18,7 +18,7 @@ on:
       limit:
         description: "1ブランドあたり最大カード数"
         required: false
-        default: "60"
+        default: "100"
 
 concurrency:
   group: crawl-grade-prices
@@ -28,7 +28,7 @@ jobs:
   pokemon:
     if: ${{ github.event.inputs.brand != 'onepiece' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,14 +45,14 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          LIMIT="${{ github.event.inputs.limit || '60' }}"
+          LIMIT="${{ github.event.inputs.limit || '100' }}"
           python -m backend.scripts.fetch_grade_prices \
             --brand pokemon --limit "$LIMIT" --delay 5
 
   onepiece:
     if: ${{ github.event.inputs.brand != 'pokemon' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -69,6 +69,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          LIMIT="${{ github.event.inputs.limit || '60' }}"
+          LIMIT="${{ github.event.inputs.limit || '100' }}"
           python -m backend.scripts.fetch_grade_prices \
             --brand onepiece --limit "$LIMIT" --delay 5
