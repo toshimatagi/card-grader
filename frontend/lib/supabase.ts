@@ -9,9 +9,19 @@ function headers(): HeadersInit {
   };
 }
 
+/**
+ * Supabase REST GET wrapper.
+ *
+ * デフォルトで Next.js Data Cache に 60秒入れる (revalidate=60)。
+ * Vercel が iad1 (US East) でDBが ap-south-1 (Mumbai) なので
+ * 1クエリ往復 ~500ms → キャッシュHIT で ~5ms に短縮できる。
+ *
+ * @param revalidate キャッシュ秒数。0 で no-store (常に最新)。null で fetch default
+ */
 export async function sbGet<T = unknown>(
   path: string,
-  params?: string
+  params?: string,
+  revalidate: number | null = 60,
 ): Promise<T> {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase 環境変数未設定 (SUPABASE_URL / SUPABASE_SERVICE_KEY)");
@@ -19,7 +29,15 @@ export async function sbGet<T = unknown>(
   const url = params
     ? `${SUPABASE_URL}/rest/v1/${path}?${params}`
     : `${SUPABASE_URL}/rest/v1/${path}`;
-  const res = await fetch(url, { headers: headers(), cache: "no-store" });
+  const init: RequestInit & { next?: { revalidate?: number } } = {
+    headers: headers(),
+  };
+  if (revalidate === 0) {
+    init.cache = "no-store";
+  } else if (revalidate != null) {
+    init.next = { revalidate };
+  }
+  const res = await fetch(url, init);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Supabase ${res.status}: ${text}`);
@@ -29,17 +47,23 @@ export async function sbGet<T = unknown>(
 
 export async function sbRpc<T = unknown>(
   fn: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  revalidate: number | null = 60,
 ): Promise<T> {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase 環境変数未設定 (SUPABASE_URL / SUPABASE_SERVICE_KEY)");
   }
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+  const init: RequestInit & { next?: { revalidate?: number } } = {
     method: "POST",
     headers: headers(),
     body: JSON.stringify(body),
-    cache: "no-store",
-  });
+  };
+  if (revalidate === 0) {
+    init.cache = "no-store";
+  } else if (revalidate != null) {
+    init.next = { revalidate };
+  }
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, init);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Supabase RPC ${fn} ${res.status}: ${text}`);

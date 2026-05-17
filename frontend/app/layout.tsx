@@ -4,9 +4,9 @@ import GoogleAnalytics from "../components/GoogleAnalytics";
 import AdSense from "../components/AdSense";
 import HeaderAuth from "../components/auth/HeaderAuth";
 
-// 全ての server route を Supabase (ap-south-1 Mumbai) と同居させる。
-// 元は iad1 (US East) で 1クエリあたり 500ms 飛んでた。
-export const preferredRegion = "bom1";
+// Vercel Hobby plan は iad1 (US East) 固定のため preferredRegion は効かない。
+// Pro upgrade 後に "bom1" 等を指定して Supabase (ap-south-1) に近づける。
+// 現状は sbGet の Next.js Data Cache (revalidate=60) で DB 往復を削減して対処。
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
 const SITE_NAME = "TCG Authority - ワンピカード・ポケカの型番・相場・状態チェック";
