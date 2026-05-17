@@ -42,6 +42,16 @@ export default function CameraCapture({
   const [autoScan, setAutoScan] = useState(true);
   const [aligned, setAligned] = useState(false);
   const [countdown, setCountdown] = useState(0); // 0..1 (自動撮影までの進捗)
+  // カメラハードウェアズーム (対応端末のみ。Android Chrome / iOS Safari 15+ の背面カメラ等)
+  const [zoomCaps, setZoomCaps] = useState<{
+    min: number;
+    max: number;
+    step: number;
+  } | null>(null);
+  const [zoomValue, setZoomValue] = useState(1);
+  const zoomValueRef = useRef(1);
+  const pinchBaseDistRef = useRef<number | null>(null);
+  const pinchBaseZoomRef = useRef(1);
   const readyAtRef = useRef<number | null>(null);
   const stableSinceRef = useRef<number | null>(null);
   // 解析ループ内で最新値を読むための ref
@@ -77,6 +87,27 @@ export default function CameraCapture({
           await videoRef.current.play();
           setReady(true);
           readyAtRef.current = Date.now();
+
+          // ハードウェアズーム capability の検出
+          const track = stream.getVideoTracks()[0];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const caps = (track.getCapabilities as any)?.call(track) as
+            | { zoom?: { min: number; max: number; step?: number } }
+            | undefined;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const settings = (track.getSettings as any)?.call(track) as
+            | { zoom?: number }
+            | undefined;
+          if (caps?.zoom && typeof caps.zoom.min === "number") {
+            setZoomCaps({
+              min: caps.zoom.min,
+              max: caps.zoom.max,
+              step: caps.zoom.step ?? 0.1,
+            });
+            const initial = settings?.zoom ?? caps.zoom.min;
+            setZoomValue(initial);
+            zoomValueRef.current = initial;
+          }
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -89,6 +120,69 @@ export default function CameraCapture({
       streamRef.current = null;
     };
   }, []);
+
+  // カメラハードウェアズームを適用
+  const applyHardwareZoom = useCallback((next: number) => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track || !zoomCaps) return;
+    const clamped = Math.min(zoomCaps.max, Math.max(zoomCaps.min, next));
+    zoomValueRef.current = clamped;
+    setZoomValue(clamped);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    track.applyConstraints({ advanced: [{ zoom: clamped } as any] }).catch(() => {
+      // 一部端末で applyConstraints が rejected されるが UI 上は値変更を維持
+    });
+  }, [zoomCaps]);
+
+  // ピンチジェスチャ → ハードウェアズーム (ページのピンチズームを乗っ取る)
+  // ※ React の onTouchMove は passive デフォルトなので preventDefault が効かない。
+  //    native addEventListener で {passive: false} 指定が必須。
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    function getDist(touches: TouchList): number {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    }
+
+    function onTouchStart(e: TouchEvent) {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        pinchBaseDistRef.current = getDist(e.touches);
+        pinchBaseZoomRef.current = zoomValueRef.current;
+      }
+    }
+    function onTouchMove(e: TouchEvent) {
+      if (e.touches.length === 2 && pinchBaseDistRef.current != null) {
+        e.preventDefault();
+        if (!zoomCaps) return; // HW未対応端末は無視 (ページのピンチも touch-action: none で抑止済み)
+        const dist = getDist(e.touches);
+        const ratio = dist / pinchBaseDistRef.current;
+        // ズーム範囲を倍率変化に対応 (例: 1→max まで指の動きにフィット)
+        const targetSpan = zoomCaps.max - zoomCaps.min;
+        const delta = (ratio - 1) * targetSpan * 0.7; // 感度調整
+        applyHardwareZoom(pinchBaseZoomRef.current + delta);
+      }
+    }
+    function onTouchEnd(e: TouchEvent) {
+      if (e.touches.length < 2) {
+        pinchBaseDistRef.current = null;
+      }
+    }
+
+    container.addEventListener("touchstart", onTouchStart, { passive: false });
+    container.addEventListener("touchmove", onTouchMove, { passive: false });
+    container.addEventListener("touchend", onTouchEnd, { passive: false });
+    container.addEventListener("touchcancel", onTouchEnd, { passive: false });
+    return () => {
+      container.removeEventListener("touchstart", onTouchStart);
+      container.removeEventListener("touchmove", onTouchMove);
+      container.removeEventListener("touchend", onTouchEnd);
+      container.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [zoomCaps, applyHardwareZoom]);
 
   // 端末傾き (水平インジケータ用)
   // beta: 前後傾き (画面が天井向きで90°)
@@ -370,6 +464,9 @@ export default function CameraCapture({
       <div
         ref={containerRef}
         className="relative flex-1 overflow-hidden bg-black"
+        // ブラウザ標準のピンチズームを無効化 (フレーム overlay とのズレ防止)。
+        // 代わりにカメラハードウェアズームを上の useEffect で実装。
+        style={{ touchAction: "none" }}
       >
         <video
           ref={videoRef}
@@ -397,6 +494,49 @@ export default function CameraCapture({
         {error && (
           <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 p-4 bg-red-900/80 text-white rounded-lg text-sm">
             {error}
+          </div>
+        )}
+
+        {/* ズームスライダー (HW対応端末のみ表示。ピンチ操作中も連動して動く) */}
+        {zoomCaps && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col items-center gap-2 bg-black/50 rounded-full px-2 py-3 backdrop-blur-sm">
+            <button
+              type="button"
+              onClick={() =>
+                applyHardwareZoom(Math.min(zoomCaps.max, zoomValue + zoomCaps.step * 4))
+              }
+              className="text-white text-lg w-7 h-7 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
+              aria-label="ズーム+"
+            >
+              ＋
+            </button>
+            <input
+              type="range"
+              min={zoomCaps.min}
+              max={zoomCaps.max}
+              step={zoomCaps.step}
+              value={zoomValue}
+              onChange={(e) => applyHardwareZoom(parseFloat(e.target.value))}
+              className="appearance-none w-32 h-1 bg-white/30 rounded-full"
+              style={{
+                writingMode: "vertical-lr" as const,
+                WebkitAppearance: "slider-vertical" as never,
+              }}
+              aria-label="カメラズーム"
+            />
+            <button
+              type="button"
+              onClick={() =>
+                applyHardwareZoom(Math.max(zoomCaps.min, zoomValue - zoomCaps.step * 4))
+              }
+              className="text-white text-lg w-7 h-7 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
+              aria-label="ズーム−"
+            >
+              −
+            </button>
+            <span className="text-white text-[10px] tabular-nums">
+              ×{zoomValue.toFixed(1)}
+            </span>
           </div>
         )}
       </div>
