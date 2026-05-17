@@ -14,7 +14,8 @@ import {
   formatOnePieceSetLabel,
 } from "../../../lib/onepieceSets";
 
-export const dynamic = "force-dynamic";
+// force-dynamic を外して ISR で 10分キャッシュ。全ユーザー共通データ
+export const revalidate = 600;
 
 export const metadata: Metadata = {
   title: "ワンピカード価格DB - 全カード相場",

@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { getTrending, listSets, type TrendingCard } from "../../lib/api";
 import { getPokemonSetMeta } from "../../lib/pokemonSets";
 
-export const dynamic = "force-dynamic";
+// force-dynamic は外して ISR (revalidate) を効かせる。全ユーザー共通データなのでキャッシュOK
 export const revalidate = 600; // 10分
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";

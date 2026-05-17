@@ -1,16 +1,16 @@
 /**
- * ヘッダ右端の認証 UI。
+ * ヘッダ右端の認証 UI (完全 client side)。
  *
- * ログイン前: 「ログイン」ボタン (Google OAuth 起動)
- * ログイン後: 表示名 + ドロップダウン (コレクション / アカウント / ログアウト)
+ * 元は layout.tsx で cookies() 読んで user を server で取得していたが、
+ * cookies() 使用が layout 全体を dynamic 化 → 全ページの ISR が効かなくなる
+ * 致命的問題があった。client 側で auth state を fetch する方式に変更。
  *
- * Server Component (layout.tsx) から currentUser (server で取得済の最低限情報)
- * を props で受け取り、UI操作のみ client で実行。getUser() を client で
- * 再度叩くと SSR/CSR で別レスポンスになり ちらつくため。
+ * トレードオフ: 初回表示は「ログイン」ボタンが一瞬出てから user 名に切替わる
+ *   (ログイン中ユーザーのみ。匿名ユーザーには影響なし)。ISR/static の速度メリットが上回る。
  */
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "../../lib/supabase/client";
 
@@ -19,8 +19,42 @@ export type HeaderUser = {
   displayName: string | null;
 };
 
-export default function HeaderAuth({ user }: { user: HeaderUser | null }) {
+export default function HeaderAuth() {
+  const [user, setUser] = useState<HeaderUser | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // mount 後に client から auth 状態を fetch (server 側で見ない → ISR 維持)
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createSupabaseBrowserClient();
+    (async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (cancelled || !authUser) return;
+      const { data: profile } = await supabase
+        .from("user_profiles")
+        .select("display_name")
+        .eq("id", authUser.id)
+        .maybeSingle();
+      if (cancelled) return;
+      setUser({
+        id: authUser.id,
+        displayName: (profile?.display_name as string | null) ?? null,
+      });
+    })();
+    // session 変更を購読 (login/logout 時に UI 即追従)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (!session?.user) {
+          setUser(null);
+        }
+        // login 時の profile 取得は↑の初回 effect でカバー
+      },
+    );
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   if (!user) {
     return (

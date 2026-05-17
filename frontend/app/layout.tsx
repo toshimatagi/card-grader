@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 import GoogleAnalytics from "../components/GoogleAnalytics";
 import AdSense from "../components/AdSense";
-import HeaderAuth, { type HeaderUser } from "../components/auth/HeaderAuth";
-import { createSupabaseServerClient } from "../lib/supabase/server";
+import HeaderAuth from "../components/auth/HeaderAuth";
+
+// 全ての server route を Supabase (ap-south-1 Mumbai) と同居させる。
+// 元は iad1 (US East) で 1クエリあたり 500ms 飛んでた。
+export const preferredRegion = "bom1";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
 const SITE_NAME = "TCG Authority - ワンピカード・ポケカの型番・相場・状態チェック";
@@ -51,32 +54,11 @@ const AUTH_ENABLED =
   !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
   !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-async function getHeaderUser(): Promise<HeaderUser | null> {
-  if (!AUTH_ENABLED) return null;
-  try {
-    const supabase = createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-    const { data: profile } = await supabase
-      .from("user_profiles")
-      .select("display_name")
-      .eq("id", user.id)
-      .maybeSingle();
-    return {
-      id: user.id,
-      displayName: profile?.display_name ?? null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const user = await getHeaderUser();
   return (
     <html lang="ja">
       <head>
@@ -160,7 +142,7 @@ export default async function RootLayout({
               <a href="/guide" className="hover:text-blue-400 transition-colors">
                 使い方
               </a>
-              {AUTH_ENABLED && <HeaderAuth user={user} />}
+              {AUTH_ENABLED && <HeaderAuth />}
             </div>
           </nav>
         </header>

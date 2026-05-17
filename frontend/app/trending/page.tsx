@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { getTrending, type TrendingCard } from "../../lib/api";
 
-export const dynamic = "force-dynamic";
+// force-dynamic 外して ISR 効かせる。ranking は 10分で十分鮮度OK
 export const revalidate = 600; // 10分
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
