@@ -15,6 +15,13 @@ import GradeCardLinker from "../../../components/result/GradeCardLinker";
 import AffiliateBlock from "../../../components/affiliate/AffiliateBlock";
 import AddToCollection from "../../../components/collection/AddToCollection";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import {
+  estimateGradeProbabilities,
+  expectedROI,
+  PSA_COST,
+  PROB_LABELS,
+  type GradeProbabilities,
+} from "../../../lib/psaProbability";
 
 export const dynamic = "force-dynamic";
 
@@ -355,37 +362,17 @@ function EstimatedGradeAndPrice({
                   );
                 })}
               </div>
-              {estimatedPrice != null && (
-                <div className="mt-3 p-3 rounded bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-300 text-sm">
-                  <div className="font-bold text-amber-900">
-                    💰 あなたのスコアでの推定価格
-                  </div>
-                  <div className="mt-1 text-xs text-amber-800">
-                    AI鑑定スコア {overallGrade.toFixed(1)} →{" "}
-                    {GRADE_LABEL[estimatedGrade]} 相当 →{" "}
-                    <strong className="text-base text-amber-900">
-                      約 ¥{estimatedPrice.toLocaleString()}
-                    </strong>
-                    {gradeAggregated.raw &&
-                      gradeAggregated.raw.price_median &&
-                      estimatedGrade !== "raw" && (
-                        <>
-                          {" "}(Raw ¥
-                          {gradeAggregated.raw.price_median.toLocaleString()}
-                          {" "}との差額 +¥
-                          {(
-                            estimatedPrice -
-                            gradeAggregated.raw.price_median
-                          ).toLocaleString()}
-                          )
-                        </>
-                      )}
-                  </div>
-                  <p className="mt-2 text-[10px] text-amber-800 leading-relaxed">
-                    ※ 推定値です。実際の鑑定機関の判定や落札価格を保証するものではありません。
-                  </p>
-                </div>
-              )}
+              {/* PSA当選確率 + 期待値ROI (独自軸) */}
+              <PsaProbabilityBlock
+                overallGrade={overallGrade}
+                confidence={confidence}
+                prices={{
+                  psa10: gradeAggregated.psa10?.price_median ?? null,
+                  psa9:  gradeAggregated.psa9?.price_median  ?? null,
+                  psa8:  gradeAggregated.psa8?.price_median  ?? null,
+                  raw:   gradeAggregated.raw?.price_median   ?? null,
+                }}
+              />
             </>
           )}
 
@@ -462,5 +449,129 @@ function EstimatedGradeAndPrice({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * AI鑑定スコアから PSA 当選確率分布と期待売却価格・損益を計算して表示する。
+ * 「あなたのカードは PSA10 が何%、提出すると期待利益いくら」が一目で分かる独自軸。
+ */
+function PsaProbabilityBlock({
+  overallGrade,
+  confidence,
+  prices,
+}: {
+  overallGrade: number;
+  confidence: number;
+  prices: {
+    psa10: number | null;
+    psa9: number | null;
+    psa8: number | null;
+    raw: number | null;
+  };
+}) {
+  const probs = estimateGradeProbabilities(overallGrade, confidence);
+
+  // Raw 価格を購入価格の仮想プレースホルダーに (= 仕入れて提出するシミュレーション)
+  const assumedPurchase = prices.raw ?? 0;
+  const roi = expectedROI(probs, prices, assumedPurchase, PSA_COST.total);
+
+  const hasAnyPrice =
+    prices.psa10 != null || prices.psa9 != null || prices.psa8 != null;
+
+  return (
+    <div className="mt-4 p-4 rounded-lg bg-gradient-to-br from-purple-50 to-blue-50 border-2 border-purple-200">
+      <div className="text-sm font-bold text-purple-900 mb-2">
+        🎯 PSA 提出時の当選確率 (AI鑑定スコアから推定)
+      </div>
+
+      {/* 確率分布バー */}
+      <div className="grid grid-cols-4 gap-1 mb-3">
+        {(["psa10", "psa9", "psa8", "below_psa8"] as const).map((g) => {
+          const p = probs[g];
+          const pct = Math.round(p * 100);
+          const isTop = p === Math.max(...Object.values(probs));
+          return (
+            <div
+              key={g}
+              className={`text-center rounded p-2 ${
+                isTop
+                  ? "bg-purple-200 ring-2 ring-purple-500"
+                  : "bg-white border border-purple-100"
+              }`}
+            >
+              <div className="text-[10px] font-bold text-purple-900">
+                {PROB_LABELS[g]}
+              </div>
+              <div
+                className={`text-lg font-extrabold tabular-nums ${
+                  isTop ? "text-purple-900" : "text-gray-600"
+                }`}
+              >
+                {pct}%
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 期待売却価格 + ROI */}
+      {hasAnyPrice && roi.expectedSale != null && (
+        <div className="rounded bg-white border border-purple-200 p-3 text-sm space-y-1">
+          <div className="flex justify-between items-baseline">
+            <span className="text-xs text-gray-600">期待売却価格 (確率加重)</span>
+            <strong className="text-lg text-purple-900 tabular-nums">
+              ¥{roi.expectedSale.toLocaleString()}
+            </strong>
+          </div>
+          {assumedPurchase > 0 && (
+            <>
+              <div className="flex justify-between text-xs text-gray-600">
+                <span>− 仕入想定 (Raw中央値)</span>
+                <span className="tabular-nums">
+                  ¥{assumedPurchase.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between text-xs text-gray-600">
+                <span>− 鑑定費用 (PSA日本標準 + 送料)</span>
+                <span className="tabular-nums">
+                  ¥{PSA_COST.total.toLocaleString()}
+                </span>
+              </div>
+              <div
+                className={`flex justify-between items-baseline pt-1 border-t ${
+                  roi.expectedProfit! >= 0
+                    ? "text-green-700"
+                    : "text-red-700"
+                }`}
+              >
+                <span className="text-xs font-bold">期待利益</span>
+                <strong className="text-base tabular-nums">
+                  {roi.expectedProfit! >= 0 ? "+" : "−"}¥
+                  {Math.abs(roi.expectedProfit!).toLocaleString()}
+                  {roi.roiPct != null && (
+                    <span className="text-xs ml-1">
+                      ({roi.roiPct >= 0 ? "+" : ""}
+                      {roi.roiPct.toFixed(0)}%)
+                    </span>
+                  )}
+                </strong>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {!hasAnyPrice && (
+        <p className="text-[11px] text-gray-600 bg-white p-2 rounded border border-purple-100">
+          このカードの PSA価格データはまだ収集中のため、期待利益の試算は省略しています。
+        </p>
+      )}
+
+      <p className="mt-2 text-[10px] text-purple-800 leading-relaxed">
+        ※ 当選確率は AI鑑定スコアからの推定値で、実際の PSA 判定結果を保証するものではありません。
+        実データに基づく確率キャリブレーションは今後の実績蓄積で精度向上予定。
+      </p>
+    </div>
   );
 }

@@ -69,6 +69,9 @@ export default function HeaderAuth({ user }: { user: HeaderUser | null }) {
         <Link href="/collection" className="block px-3 py-2 text-sm hover:bg-gray-700">
           📚 コレクション
         </Link>
+        <Link href="/watchlist" className="block px-3 py-2 text-sm hover:bg-gray-700">
+          ⭐ ウォッチリスト
+        </Link>
         <Link href="/account" className="block px-3 py-2 text-sm hover:bg-gray-700">
           ⚙️ アカウント
         </Link>

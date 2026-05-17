@@ -17,6 +17,8 @@ import {
 import PriceChart from "../../../components/cards/PriceChart";
 import ShareButtons from "../../../components/share/ShareButtons";
 import AddToCollection from "../../../components/collection/AddToCollection";
+import Psa10Simulator from "../../../components/psa/Psa10Simulator";
+import AddToWatchlist from "../../../components/collection/AddToWatchlist";
 import { getPokemonSetMeta } from "../../../lib/pokemonSets";
 import { getOnePieceSetMeta } from "../../../lib/onepieceSets";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
@@ -59,6 +61,8 @@ type CollectionState = {
   loggedIn: boolean;
   // card_id → そのカード×grade ごとの保有エントリ一覧
   perCard: Record<string, { quantity: number; grade: string }[]>;
+  // 同じカードのウォッチリスト entry (1人1card)
+  watchByCard: Record<string, { alert_below: number | null; note: string | null }>;
 };
 
 async function getCollectionState(
@@ -68,28 +72,43 @@ async function getCollectionState(
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
     !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   ) {
-    return { authEnabled: false, loggedIn: false, perCard: {} };
+    return { authEnabled: false, loggedIn: false, perCard: {}, watchByCard: {} };
   }
   try {
     const supabase = createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { authEnabled: true, loggedIn: false, perCard: {} };
-    if (cardIds.length === 0) return { authEnabled: true, loggedIn: true, perCard: {} };
-    const { data } = await supabase
-      .from("user_collections")
-      .select("card_id,quantity,grade")
-      .in("card_id", cardIds);
+    if (!user) return { authEnabled: true, loggedIn: false, perCard: {}, watchByCard: {} };
+    if (cardIds.length === 0) return { authEnabled: true, loggedIn: true, perCard: {}, watchByCard: {} };
+
+    const [collectionsRes, watchRes] = await Promise.all([
+      supabase
+        .from("user_collections")
+        .select("card_id,quantity,grade")
+        .in("card_id", cardIds),
+      supabase
+        .from("user_watchlist")
+        .select("card_id,alert_below,note")
+        .in("card_id", cardIds),
+    ]);
+
     const perCard: CollectionState["perCard"] = {};
-    for (const row of data ?? []) {
+    for (const row of collectionsRes.data ?? []) {
       const k = row.card_id as string;
       (perCard[k] ??= []).push({
         quantity: row.quantity as number,
         grade: row.grade as string,
       });
     }
-    return { authEnabled: true, loggedIn: true, perCard };
+    const watchByCard: CollectionState["watchByCard"] = {};
+    for (const row of watchRes.data ?? []) {
+      watchByCard[row.card_id as string] = {
+        alert_below: row.alert_below as number | null,
+        note: row.note as string | null,
+      };
+    }
+    return { authEnabled: true, loggedIn: true, perCard, watchByCard };
   } catch {
-    return { authEnabled: true, loggedIn: false, perCard: {} };
+    return { authEnabled: true, loggedIn: false, perCard: {}, watchByCard: {} };
   }
 }
 
@@ -347,6 +366,17 @@ export default async function CardDetailPage({
         <p className="text-xs text-gray-500 mb-4">
           📚 コレクションに追加するには下の「バリアント別 価格」表の各行から選択してください。
         </p>
+      )}
+      {collectionState.authEnabled && (
+        <div className="mb-4">
+          <AddToWatchlist
+            cardId={firstCard.id}
+            authEnabled={collectionState.authEnabled}
+            loggedIn={collectionState.loggedIn}
+            existing={collectionState.watchByCard[firstCard.id] ?? null}
+            currentSellPrice={firstCard.sell_price ?? null}
+          />
+        </div>
       )}
 
       {/* 高額バリアント警告 (B-3) */}
@@ -617,6 +647,17 @@ export default async function CardDetailPage({
           </>
         )}
       </section>
+
+      {/* PSA10提出 損益シミュレーター (独自軸) */}
+      <Psa10Simulator
+        cardName={data.cards[0].name_ja}
+        prices={{
+          psa10: gradeAggregated.psa10?.price_median ?? null,
+          psa9:  gradeAggregated.psa9?.price_median  ?? null,
+          psa8:  gradeAggregated.psa8?.price_median  ?? null,
+          raw:   gradeAggregated.raw?.price_median   ?? null,
+        }}
+      />
 
       <section className="mb-8">
         <h2 className="font-bold mb-2">販売価格の推移</h2>
