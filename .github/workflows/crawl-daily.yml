@@ -32,6 +32,10 @@ jobs:
           # cutoff を計算するので、同 source の複数 brand 干渉は解消されている
           - source: fullahead
             brand: pokemon
+          # toretoku/pokemon は 1リクエストで全件 (~158件 of M/SV系) 取れる。
+          # 買取価格 (price_type=buy) ソース。fullahead と組み合わせて source>=2 を実現
+          - source: toretoku
+            brand: pokemon
     steps:
       - uses: actions/checkout@v4
 
