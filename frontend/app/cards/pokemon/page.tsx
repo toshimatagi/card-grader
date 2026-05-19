@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import {
   searchCards,
@@ -42,31 +43,119 @@ type Group = {
 
 const BRAND = "pokemon";
 
+type SearchParams = { set?: string; q?: string; rarity?: string; sort?: string };
+
 export default async function PokemonCardsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ set?: string; q?: string; rarity?: string; sort?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const sp = await searchParams;
-  const sort = sp.sort || "code";
 
-  const [sets, rarities, result] = await Promise.all([
+  // shell に必要な軽い情報 (sets/rarities) は即取得。
+  // 重い search + 価格集計は CardListSection 内で Suspense 配下で取得。
+  const [sets, rarities] = await Promise.all([
     listSets(BRAND).catch(() => ({ sets: [] })),
     listRarities(BRAND).catch(() => [] as string[]),
-    searchCards({
-      brand: BRAND,
-      set_code: sp.set,
-      rarity: sp.rarity,
-      q: sp.q,
-      limit: 200,
-    }).catch(() => ({ items: [], count: 0 })),
   ]);
 
+  return (
+    <div>
+      <nav className="text-xs text-gray-500 mb-2">
+        <Link href="/cards" className="hover:underline">価格DB</Link>
+        <span className="mx-1.5">/</span>
+        <span>ポケモンカード</span>
+      </nav>
+      <h1 className="text-2xl font-bold mb-2">ポケモンカード価格DB</h1>
+      <p className="text-sm text-gray-600 mb-6">
+        各型番のバリアント別価格推移を閲覧できます。表示価格は複数サイトから集計した中央値。
+      </p>
+
+      <CardsFilterForm
+        sets={sets.sets}
+        rarities={rarities}
+        initialSet={sp.set ?? ""}
+        initialRarity={sp.rarity ?? ""}
+        initialQ={sp.q ?? ""}
+        initialSort={sp.sort ?? "code"}
+        action="/cards/pokemon"
+        setLabels={Object.fromEntries(
+          sets.sets.map((s) => [s.set_code, formatPokemonSetLabel(s.set_code)])
+        )}
+      />
+
+      {/* セット (弾) の見出しチップ */}
+      <div className="mb-4">
+        <div className="text-xs text-gray-500 mb-1.5">対応弾</div>
+        <div className="flex flex-wrap gap-1.5">
+          {(() => {
+            const dataCounts = Object.fromEntries(
+              sets.sets.map((s) => [s.set_code, s.count]),
+            );
+            const allCodes = Array.from(
+              new Set([
+                ...sets.sets.map((s) => s.set_code),
+                ...Object.keys(POKEMON_SETS),
+              ]),
+            ).sort((a, b) => b.localeCompare(a));
+            return allCodes.map((code) => {
+              const meta = getPokemonSetMeta(code);
+              const cnt = dataCounts[code] ?? 0;
+              return (
+                <Link
+                  key={code}
+                  href={`/cards/pokemon/${code}`}
+                  className={`text-xs px-2 py-1 rounded border bg-white hover:bg-yellow-50 ${
+                    sp.set === code
+                      ? "border-yellow-500 ring-1 ring-yellow-300"
+                      : "border-yellow-300"
+                  } text-yellow-900`}
+                >
+                  <span className="font-mono">{code}</span>
+                  {meta && <span className="ml-1">{meta.name}</span>}
+                  <span className="text-gray-400 ml-1">
+                    ({cnt > 0 ? cnt : "予定"})
+                  </span>
+                </Link>
+              );
+            });
+          })()}
+        </div>
+      </div>
+
+      {/* 重い検索 + 価格集計は Suspense 内で stream */}
+      <Suspense fallback={<CardListSkeleton />} key={JSON.stringify(sp)}>
+        <CardListSection sp={sp} />
+      </Suspense>
+    </div>
+  );
+}
+
+/**
+ * 重い処理 (searchCards 200件 + attachLatestPrices で snapshot 集計 + group化)
+ * を切り出し。Suspense 配下で stream される。
+ */
+async function CardListSection({ sp }: { sp: SearchParams }) {
+  const sort = sp.sort || "code";
+
+  const result = await searchCards({
+    brand: BRAND,
+    set_code: sp.set,
+    rarity: sp.rarity,
+    q: sp.q,
+    limit: 200,
+  }).catch(() => ({ items: [], count: 0 }));
+
   const priced = await attachLatestPrices(result.items, 168).catch(
-    () => result.items.map((c) => ({ ...c, sell_price: null, buy_price: null })) as CardSummaryWithPrice[]
+    () =>
+      result.items.map((c) => ({
+        ...c,
+        sell_price: null,
+        buy_price: null,
+      })) as CardSummaryWithPrice[],
   );
 
-  // 型番でグループ化（variant 別に分かれているため）
+  // 型番でグループ化
   const groupMap = new Map<string, CardSummaryWithPrice[]>();
   for (const c of priced) {
     const key = `${c.set_code}-${c.card_no}`;
@@ -117,119 +206,80 @@ export default async function PokemonCardsPage({
     }
   });
 
-  return (
-    <div>
-      <nav className="text-xs text-gray-500 mb-2">
-        <Link href="/cards" className="hover:underline">価格DB</Link>
-        <span className="mx-1.5">/</span>
-        <span>ポケモンカード</span>
-      </nav>
-      <h1 className="text-2xl font-bold mb-2">ポケモンカード価格DB</h1>
-      <p className="text-sm text-gray-600 mb-6">
-        各型番のバリアント別価格推移を閲覧できます。表示価格は複数サイトから集計した中央値。
+  if (groups.length === 0) {
+    return (
+      <p className="text-gray-500">
+        該当するカードがありません。フィルタや検索条件を変更してください。
       </p>
+    );
+  }
 
-      <CardsFilterForm
-        sets={sets.sets}
-        rarities={rarities}
-        initialSet={sp.set ?? ""}
-        initialRarity={sp.rarity ?? ""}
-        initialQ={sp.q ?? ""}
-        initialSort={sort}
-        action="/cards/pokemon"
-        setLabels={Object.fromEntries(
-          sets.sets.map((s) => [s.set_code, formatPokemonSetLabel(s.set_code)])
-        )}
-      />
-
-      {/* セット (弾) の見出しチップ — メタの全弾を表示しSEO内部リンクを増やす */}
-      <div className="mb-4">
-        <div className="text-xs text-gray-500 mb-1.5">対応弾</div>
-        <div className="flex flex-wrap gap-1.5">
-          {(() => {
-            const dataCounts = Object.fromEntries(
-              sets.sets.map((s) => [s.set_code, s.count]),
-            );
-            const allCodes = Array.from(
-              new Set([
-                ...sets.sets.map((s) => s.set_code),
-                ...Object.keys(POKEMON_SETS),
-              ]),
-            ).sort((a, b) => b.localeCompare(a));
-            return allCodes.map((code) => {
-              const meta = getPokemonSetMeta(code);
-              const cnt = dataCounts[code] ?? 0;
-              return (
-                <Link
-                  key={code}
-                  href={`/cards/pokemon/${code}`}
-                  className={`text-xs px-2 py-1 rounded border bg-white hover:bg-yellow-50 ${
-                    sp.set === code
-                      ? "border-yellow-500 ring-1 ring-yellow-300"
-                      : "border-yellow-300"
-                  } text-yellow-900`}
-                >
-                  <span className="font-mono">{code}</span>
-                  {meta && <span className="ml-1">{meta.name}</span>}
-                  <span className="text-gray-400 ml-1">
-                    ({cnt > 0 ? cnt : "予定"})
-                  </span>
-                </Link>
-              );
-            });
-          })()}
-        </div>
+  return (
+    <>
+      <p className="text-xs text-gray-500 mb-3">{groups.length} 件表示</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        {groups.map((g) => (
+          <Link
+            key={g.code}
+            href={`/cards/${g.code}`}
+            className="border rounded p-3 hover:shadow-md transition-shadow flex flex-col"
+          >
+            {g.image_url ? (
+              <img
+                src={g.image_url}
+                alt={g.name_ja}
+                className="w-full h-auto mb-2 rounded"
+                loading="lazy"
+              />
+            ) : (
+              <div className="w-full aspect-[5/7] bg-gray-100 mb-2 rounded flex items-center justify-center text-gray-400 text-xs">
+                No Image
+              </div>
+            )}
+            <div className="text-xs text-gray-500">{g.code}</div>
+            <div className="text-sm font-bold leading-tight mb-1 line-clamp-2">
+              {g.name_ja}
+            </div>
+            <div className="text-xs text-gray-500 mb-2">
+              {g.rarities.slice(0, 3).join(" / ")}
+              {g.variant_count > 1 && ` · ${g.variant_count}種`}
+            </div>
+            <div className="mt-auto">
+              {g.best_sell != null ? (
+                <div className="text-sm font-semibold text-blue-700">
+                  ¥{g.best_sell.toLocaleString()}
+                  <span className="text-[10px] text-gray-400 font-normal ml-1">最高値</span>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400">取引履歴なし</div>
+              )}
+            </div>
+          </Link>
+        ))}
       </div>
+    </>
+  );
+}
 
-      {groups.length === 0 ? (
-        <p className="text-gray-500">
-          該当するカードがありません。フィルタや検索条件を変更してください。
-        </p>
-      ) : (
-        <>
-          <p className="text-xs text-gray-500 mb-3">{groups.length} 件表示</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {groups.map((g) => (
-              <Link
-                key={g.code}
-                href={`/cards/${g.code}`}
-                className="border rounded p-3 hover:shadow-md transition-shadow flex flex-col"
-              >
-                {g.image_url ? (
-                  <img
-                    src={g.image_url}
-                    alt={g.name_ja}
-                    className="w-full h-auto mb-2 rounded"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="w-full aspect-[5/7] bg-gray-100 mb-2 rounded flex items-center justify-center text-gray-400 text-xs">
-                    No Image
-                  </div>
-                )}
-                <div className="text-xs text-gray-500">{g.code}</div>
-                <div className="text-sm font-bold leading-tight mb-1 line-clamp-2">
-                  {g.name_ja}
-                </div>
-                <div className="text-xs text-gray-500 mb-2">
-                  {g.rarities.slice(0, 3).join(" / ")}
-                  {g.variant_count > 1 && ` · ${g.variant_count}種`}
-                </div>
-                <div className="mt-auto">
-                  {g.best_sell != null ? (
-                    <div className="text-sm font-semibold text-blue-700">
-                      ¥{g.best_sell.toLocaleString()}
-                      <span className="text-[10px] text-gray-400 font-normal ml-1">最高値</span>
-                    </div>
-                  ) : (
-                    <div className="text-xs text-gray-400">取引履歴なし</div>
-                  )}
-                </div>
-              </Link>
-            ))}
+/**
+ * カードグリッドの読み込み中表示。
+ * 実カードと同じ grid + aspect ratio の skeleton を出して CLS を防ぐ。
+ */
+function CardListSkeleton() {
+  return (
+    <>
+      <p className="text-xs text-gray-400 mb-3">読み込み中...</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <div key={i} className="border rounded p-3 flex flex-col animate-pulse">
+            <div className="w-full aspect-[5/7] bg-gray-100 mb-2 rounded" />
+            <div className="h-3 w-1/3 bg-gray-100 rounded mb-1.5" />
+            <div className="h-4 w-2/3 bg-gray-100 rounded mb-1" />
+            <div className="h-3 w-1/2 bg-gray-100 rounded mb-2" />
+            <div className="mt-auto h-4 w-1/3 bg-gray-100 rounded" />
           </div>
-        </>
-      )}
-    </div>
+        ))}
+      </div>
+    </>
   );
 }

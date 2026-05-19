@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { getTrending, type TrendingCard } from "../../lib/api";
 
@@ -93,31 +94,6 @@ export default async function TrendingPage({
     sort: sort.key,
     limit: String(limit),
   };
-
-  let items: TrendingCard[] = [];
-  let error: string | null = null;
-  try {
-    // 上位の母集団を多めに取り、フロントで並び替えて表示
-    items = await getTrending({
-      brand: brand.key,
-      periodHours: period.hours,
-      priceType: ptype.key,
-      limit: Math.max(limit, 200),
-    });
-  } catch (e) {
-    error = e instanceof Error ? e.message : "取得に失敗しました";
-  }
-
-  const sorted = [...items].sort((a, b) => {
-    if (sort.key === "diff") {
-      return (b.now_price - b.past_price) - (a.now_price - a.past_price);
-    }
-    if (sort.key === "price") {
-      return b.now_price - a.now_price;
-    }
-    return b.pct_change - a.pct_change;
-  });
-  const display = sorted.slice(0, limit);
 
   return (
     <div>
@@ -239,84 +215,161 @@ export default async function TrendingPage({
         ))}
       </div>
 
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-          データの取得に失敗しました: {error}
-        </div>
-      )}
-
-      {!error && display.length === 0 && (
-        <p className="text-gray-500">
-          この期間で集計可能なデータがまだ十分にありません。
-        </p>
-      )}
-
-      {display.length > 0 && (
-        <ol className="space-y-2">
-          {display.map((c, i) => {
-            const code = `${c.set_code}-${c.card_no}`;
-            const up = c.pct_change >= 0;
-            const diff = c.now_price - c.past_price;
-            return (
-              <li key={c.card_id}>
-                <Link
-                  href={`/cards/${code}`}
-                  className="flex items-center gap-3 p-3 border rounded-lg hover:shadow-md transition-shadow bg-white"
-                >
-                  <div className="w-8 text-center text-sm font-bold text-gray-500">
-                    {i + 1}
-                  </div>
-                  {c.image_url ? (
-                    <img
-                      src={c.image_url}
-                      alt={c.name_ja}
-                      className="w-12 h-auto rounded"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="w-12 aspect-[5/7] bg-gray-100 rounded flex items-center justify-center text-[8px] text-gray-400">
-                      No Img
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-bold truncate">
-                      {c.name_ja}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {code} · {VARIANT_LABEL[c.variant] ?? c.variant} · {c.rarity}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold">
-                      ¥{Math.round(c.now_price).toLocaleString()}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      前: ¥{Math.round(c.past_price).toLocaleString()}
-                    </div>
-                  </div>
-                  <div
-                    className={`text-right min-w-[80px] font-bold ${
-                      up ? "text-red-600" : "text-blue-600"
-                    }`}
-                  >
-                    <div className="text-base">
-                      {up ? "+" : ""}
-                      {c.pct_change.toFixed(1)}%
-                    </div>
-                    <div className="text-xs">
-                      {up ? "+" : ""}¥{Math.round(diff).toLocaleString()}
-                    </div>
-                  </div>
-                </Link>
-              </li>
-            );
-          })}
-        </ol>
-      )}
+      {/* 重い trending データ取得は Suspense 配下で stream */}
+      <Suspense
+        fallback={<TrendingListSkeleton />}
+        key={`${brand.key}-${period.key}-${ptype.key}-${sort.key}-${limit}`}
+      >
+        <TrendingListSection
+          brandKey={brand.key}
+          periodHours={period.hours}
+          priceType={ptype.key}
+          sortKey={sort.key}
+          limit={limit}
+        />
+      </Suspense>
 
       <p className="text-xs text-gray-500 mt-6">
         ※ 複数の取扱いサイトから集計した中央値の比較です。在庫切れ・¥100未満は除外。
       </p>
     </div>
+  );
+}
+
+async function TrendingListSection({
+  brandKey,
+  periodHours,
+  priceType,
+  sortKey,
+  limit,
+}: {
+  brandKey: string;
+  periodHours: number;
+  priceType: "sell" | "buy";
+  sortKey: string;
+  limit: number;
+}) {
+  let items: TrendingCard[] = [];
+  let error: string | null = null;
+  try {
+    items = await getTrending({
+      brand: brandKey,
+      periodHours,
+      priceType,
+      limit: Math.max(limit, 200),
+    });
+  } catch (e) {
+    error = e instanceof Error ? e.message : "取得に失敗しました";
+  }
+
+  const sorted = [...items].sort((a, b) => {
+    if (sortKey === "diff") {
+      return (b.now_price - b.past_price) - (a.now_price - a.past_price);
+    }
+    if (sortKey === "price") {
+      return b.now_price - a.now_price;
+    }
+    return b.pct_change - a.pct_change;
+  });
+  const display = sorted.slice(0, limit);
+
+  if (error) {
+    return (
+      <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+        データの取得に失敗しました: {error}
+      </div>
+    );
+  }
+  if (display.length === 0) {
+    return (
+      <p className="text-gray-500">
+        この期間で集計可能なデータがまだ十分にありません。
+      </p>
+    );
+  }
+  return (
+    <ol className="space-y-2">
+      {display.map((c, i) => {
+        const code = `${c.set_code}-${c.card_no}`;
+        const up = c.pct_change >= 0;
+        const diff = c.now_price - c.past_price;
+        return (
+          <li key={c.card_id}>
+            <Link
+              href={`/cards/${code}`}
+              className="flex items-center gap-3 p-3 border rounded-lg hover:shadow-md transition-shadow bg-white"
+            >
+              <div className="w-8 text-center text-sm font-bold text-gray-500">
+                {i + 1}
+              </div>
+              {c.image_url ? (
+                <img
+                  src={c.image_url}
+                  alt={c.name_ja}
+                  className="w-12 h-auto rounded"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="w-12 aspect-[5/7] bg-gray-100 rounded flex items-center justify-center text-[8px] text-gray-400">
+                  No Img
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold truncate">{c.name_ja}</div>
+                <div className="text-xs text-gray-500">
+                  {code} · {VARIANT_LABEL[c.variant] ?? c.variant} · {c.rarity}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-semibold">
+                  ¥{Math.round(c.now_price).toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-500">
+                  前: ¥{Math.round(c.past_price).toLocaleString()}
+                </div>
+              </div>
+              <div
+                className={`text-right min-w-[80px] font-bold ${
+                  up ? "text-red-600" : "text-blue-600"
+                }`}
+              >
+                <div className="text-base">
+                  {up ? "+" : ""}
+                  {c.pct_change.toFixed(1)}%
+                </div>
+                <div className="text-xs">
+                  {up ? "+" : ""}¥{Math.round(diff).toLocaleString()}
+                </div>
+              </div>
+            </Link>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function TrendingListSkeleton() {
+  return (
+    <ol className="space-y-2">
+      {Array.from({ length: 10 }).map((_, i) => (
+        <li key={i} className="flex items-center gap-3 p-3 border rounded-lg bg-white animate-pulse">
+          <div className="w-8 h-4 bg-gray-100 rounded" />
+          <div className="w-12 aspect-[5/7] bg-gray-100 rounded" />
+          <div className="flex-1">
+            <div className="h-4 w-2/3 bg-gray-100 rounded mb-1.5" />
+            <div className="h-3 w-1/3 bg-gray-100 rounded" />
+          </div>
+          <div className="text-right">
+            <div className="h-4 w-16 bg-gray-100 rounded mb-1" />
+            <div className="h-3 w-12 bg-gray-100 rounded" />
+          </div>
+          <div className="text-right min-w-[80px]">
+            <div className="h-5 w-14 bg-gray-100 rounded ml-auto mb-1" />
+            <div className="h-3 w-12 bg-gray-100 rounded ml-auto" />
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }
