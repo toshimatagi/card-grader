@@ -36,6 +36,11 @@ jobs:
           # 買取価格 (price_type=buy) ソース。fullahead と組み合わせて source>=2 を実現
           - source: toretoku
             brand: pokemon
+          # fullcomp/pokemon は Shopify ベースで価格変動する販売価格データ。
+          # 31セット 1075カード。fullahead (固定気味) と並列で sell source>=2 達成、
+          # trending_cards (sell) が pokemon でも機能するようになる
+          - source: fullcomp
+            brand: pokemon
     steps:
       - uses: actions/checkout@v4
 
