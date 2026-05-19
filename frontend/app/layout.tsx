@@ -3,6 +3,8 @@ import "./globals.css";
 import GoogleAnalytics from "../components/GoogleAnalytics";
 import AdSense from "../components/AdSense";
 import HeaderAuth from "../components/auth/HeaderAuth";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 // Vercel Hobby plan は iad1 (US East) 固定のため preferredRegion は効かない。
 // Pro upgrade 後に "bom1" 等を指定して Supabase (ap-south-1) に近づける。
@@ -148,6 +150,9 @@ export default function RootLayout({
         </header>
         <main className="max-w-6xl mx-auto px-4 py-8">{children}</main>
         <SiteFooter />
+        {/* Vercel 計測。Analytics = PV/イベント、SpeedInsights = Web Vitals (LCP/INP/CLS) */}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
