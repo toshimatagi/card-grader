@@ -1,0 +1,37 @@
+name: cron-yuyutei-pokemon
+
+# yuyutei は GH Actions IP が 403 で弾かれるため、Render API 経由で叩く。
+# Render IP は yuyutei OK (2026-05-18 判定済)。Render 側で BackgroundTask 実行。
+# pokemon の sell 価格データソースとして fullahead と並列で蓄積。
+
+on:
+  schedule:
+    # 毎日 JST 05:30 ≒ UTC 20:30 (daily crawl 30分後にずらして同居)
+    - cron: "30 20 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: cron-yuyutei-pokemon
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger Render endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          RESP=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "x-cron-secret: $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            "https://card-grader-api-tkae.onrender.com/cron/crawl-yuyutei-pokemon")
+          BODY=$(echo "$RESP" | head -n -1)
+          CODE=$(echo "$RESP" | tail -n 1)
+          echo "HTTP $CODE"
+          echo "$BODY"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::cron endpoint returned $CODE"
+            exit 1
+          fi

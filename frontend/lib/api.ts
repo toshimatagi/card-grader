@@ -378,11 +378,15 @@ export async function getTrending(params: {
   limit?: number;
 }): Promise<TrendingCard[]> {
   const brand = params.brand ?? "onepiece";
-  const items = await sbRpc<TrendingCard[]>("trending_cards", {
+  // pokemon は実質単一ソース (fullahead) なので min_sources=1 で動かす。
+  // onepiece は複数ソースあるので 2 維持。
+  const minSources = brand === "pokemon" ? 1 : 2;
+  const items = await sbRpc<TrendingCard[]>("trending_cards_v3", {
     p_brand: brand,
     p_period_hours: params.periodHours,
     p_price_type: params.priceType ?? "sell",
     p_limit: params.limit ?? 50,
+    p_min_sources: minSources,
   });
   // RPC が brand を返さないので呼び出し元のbrandを attach (フロント表示用)
   return items.map((c) => ({ ...c, brand, image_url: cleanImageUrl(c.image_url) }));
