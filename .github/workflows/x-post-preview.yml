@@ -1,0 +1,31 @@
+name: x-post-preview
+
+# X (Twitter) 投稿のプレビューを Discord に通知する dry-run。
+# @tcg_authority_x (作成2週間の新規アカウント) は凍結リスク高のため、
+# Phase 1 として 1-2週間 Discord 確認のみ。OK なら手動投稿、Phase 2 で API投稿化。
+
+on:
+  schedule:
+    # 毎日 JST 08:00 = UTC 23:00 (前日)
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: x-post-preview
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate + post preview to Discord
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python -m backend.scripts.x_post_preview
