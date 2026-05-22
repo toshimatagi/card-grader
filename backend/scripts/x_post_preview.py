@@ -87,7 +87,11 @@ def post_discord(content: str, embed_title: str, embed_desc: str, embed_url: str
     req = urllib.request.Request(
         DISCORD_WEBHOOK_URL,
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            # Cloudflare 1010 回避 (Python-urllib UA は弾かれる)
+            "User-Agent": UA,
+        },
         method="POST",
     )
     try:
