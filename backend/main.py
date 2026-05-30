@@ -2,6 +2,10 @@
 
 import asyncio
 import os
+from dotenv import load_dotenv
+
+# .envを読み込み
+load_dotenv()
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

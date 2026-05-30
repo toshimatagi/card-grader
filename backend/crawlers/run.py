@@ -22,6 +22,10 @@ import sys
 from datetime import datetime, timezone
 
 import httpx
+from dotenv import load_dotenv
+
+# プロジェクトルートの.envを読み込み
+load_dotenv()
 
 from .base import BaseScraper, CrawledCard
 from .storage import finish_run, save_crawled, start_run
