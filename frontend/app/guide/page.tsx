@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import AdUnit from "../../components/AdUnit";
 
 export const metadata: Metadata = {
   title: "使い方 - TCG Authority 利用ガイド",
@@ -66,6 +67,11 @@ export default function GuidePage() {
           </li>
         </ul>
       </section>
+
+      {/* 広告: 目次の直後 */}
+      {process.env.NEXT_PUBLIC_ADSENSE_SLOT_GUIDE && (
+        <AdUnit slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_GUIDE} className="mb-8" />
+      )}
 
       {/* 1. 概要 */}
       <section id="overview" className="mb-10">
