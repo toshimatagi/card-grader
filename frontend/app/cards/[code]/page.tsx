@@ -354,6 +354,16 @@ export default async function CardDetailPage({
       />
       {collectionState.authEnabled && data.cards.length === 1 && (
         <div className="mb-4">
+          {!collectionState.loggedIn && (
+            <div className="mb-3 p-4 rounded-xl border border-blue-200 bg-blue-50">
+              <p className="text-sm font-bold text-blue-900 mb-2">📚 無料登録でできること</p>
+              <ul className="text-xs text-blue-800 space-y-1 mb-3">
+                <li>✓ コレクション管理 — 保有カードを登録して資産総額を自動計算</li>
+                <li>✓ 含み損益の把握 — 取得価格と現在の相場を比較</li>
+                <li>✓ ウォッチリスト — 気になるカードの値動きを追跡</li>
+              </ul>
+            </div>
+          )}
           <AddToCollection
             cardId={firstCard.id}
             authEnabled={collectionState.authEnabled}

@@ -55,6 +55,16 @@ const GRADE_BG: Record<string, string> = {
   unspecified: "bg-gray-50 text-gray-500",
 };
 
+const BRAND_LABEL: Record<string, string> = {
+  onepiece: "ワンピカード",
+  pokemon: "ポケカ",
+};
+
+const BRAND_COLOR: Record<string, string> = {
+  onepiece: "bg-orange-400",
+  pokemon: "bg-yellow-400",
+};
+
 export default async function CollectionPage() {
   const supabase = createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -62,7 +72,6 @@ export default async function CollectionPage() {
     redirect("/");
   }
 
-  // RLS により自分の行のみ返る
   const { data: rows } = await supabase
     .from("user_collections")
     .select("id,card_id,quantity,grade,condition_note,acquired_price,added_at")
@@ -70,10 +79,8 @@ export default async function CollectionPage() {
 
   const collectionRows: CollectionRow[] = rows ?? [];
 
-  // card_id → card 情報を取得 (cards テーブルは価格カラム持たない)
   const cardIds = Array.from(new Set(collectionRows.map((r) => r.card_id)));
   let cardMap = new Map<string, CardSummaryWithPrice>();
-  // grade 別価格: (card_id, grade) → median
   const gradePriceMap = new Map<string, number>();
   if (cardIds.length > 0) {
     try {
@@ -81,10 +88,8 @@ export default async function CollectionPage() {
         "cards",
         `select=id,brand,set_code,card_no,variant,rarity,name_ja,image_url&id=in.(${cardIds.join(",")})`,
       );
-      // 店舗価格 (price_snapshots → Raw fallback)
       const withPrice = await attachLatestPrices(baseCards);
       cardMap = new Map(withPrice.map((c) => [c.id, c]));
-      // PSA/BGS の grade 別中央値を card_grade_prices_latest から
       const gradeRows = await sbGet<
         { card_id: string; grade: string; price_median: number | null }[]
       >(
@@ -101,8 +106,6 @@ export default async function CollectionPage() {
     }
   }
 
-  // grade を card_grade_prices_latest のキーに変換 (raw 以外は同名で OK)
-  // card_grade_prices_latest 側のキー: 'raw', 'psa10', 'psa9', 'psa8', 'bgs10', 'bgs9_5' 等
   function priceForGrade(cardId: string, grade: string, fallbackSell: number | null): number | null {
     if (grade === "unspecified") return fallbackSell;
     if (grade === "raw") {
@@ -116,57 +119,161 @@ export default async function CollectionPage() {
   let totalSell = 0;
   let totalAcquired = 0;
   let totalQuantity = 0;
-  let valuedQuantity = 0; // sell_price がついた枚数 (評価額算出ベース)
+  let valuedQuantity = 0;
+
+  const brandBreakdown = new Map<string, { qty: number; value: number }>();
+  const gradeBreakdown = new Map<string, { qty: number; value: number }>();
+
   for (const r of collectionRows) {
     const c = cardMap.get(r.card_id);
     if (!c) continue;
     totalQuantity += r.quantity;
     const p = priceForGrade(r.card_id, r.grade, c.sell_price);
+    const rowValue = p != null ? p * r.quantity : 0;
     if (p != null) {
-      totalSell += p * r.quantity;
+      totalSell += rowValue;
       valuedQuantity += r.quantity;
     }
     if (r.acquired_price != null) totalAcquired += r.acquired_price * r.quantity;
+
+    // ブランド別
+    const bc = brandBreakdown.get(c.brand) ?? { qty: 0, value: 0 };
+    brandBreakdown.set(c.brand, { qty: bc.qty + r.quantity, value: bc.value + rowValue });
+
+    // グレード別
+    const gc = gradeBreakdown.get(r.grade) ?? { qty: 0, value: 0 };
+    gradeBreakdown.set(r.grade, { qty: gc.qty + r.quantity, value: gc.value + rowValue });
   }
+
   const unrealized = totalAcquired > 0 ? totalSell - totalAcquired : null;
+
+  const brandItems = Array.from(brandBreakdown.entries())
+    .sort((a, b) => b[1].value - a[1].value);
+  const gradeItems = Array.from(gradeBreakdown.entries())
+    .filter(([, v]) => v.qty > 0)
+    .sort((a, b) => b[1].value - a[1].value)
+    .slice(0, 6);
 
   return (
     <div>
       <header className="mb-6">
         <h1 className="text-2xl font-bold mb-1">📚 マイコレクション</h1>
         <p className="text-xs text-gray-500">
-          あなたが保有しているカードと資産評価額。価格は直近1週間の販売中央値ベース、データがないものは Raw 中央値で補完。
+          保有カードの資産評価額。価格は直近1週間の販売中央値ベース。
         </p>
       </header>
 
-      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <Stat label="登録カード" value={`${collectionRows.length}種`} />
-        <Stat label="合計枚数" value={`${totalQuantity}枚`} />
-        <Stat
-          label="評価額"
-          value={totalSell > 0 ? `¥${totalSell.toLocaleString()}` : "-"}
-          sub={
-            valuedQuantity < totalQuantity
-              ? `${valuedQuantity}/${totalQuantity}枚分`
-              : undefined
-          }
-        />
-        <Stat
-          label="含み損益"
-          value={
-            unrealized != null
-              ? `${unrealized >= 0 ? "+" : "-"}¥${Math.abs(unrealized).toLocaleString()}`
-              : "-"
-          }
-          highlight={
+      {/* ヒーロー: 評価額 + 含み損益 */}
+      <section className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="bg-gradient-to-br from-blue-600 to-blue-800 text-white rounded-xl p-5">
+          <div className="text-sm text-blue-200 mb-1">コレクション評価額</div>
+          <div className="text-4xl font-extrabold tabular-nums tracking-tight">
+            {totalSell > 0 ? `¥${totalSell.toLocaleString()}` : "¥-"}
+          </div>
+          <div className="text-sm text-blue-200 mt-2 flex gap-3">
+            <span>{collectionRows.length}種</span>
+            <span>{totalQuantity}枚</span>
+            {valuedQuantity < totalQuantity && (
+              <span className="opacity-70">({valuedQuantity}枚分の価格あり)</span>
+            )}
+          </div>
+        </div>
+        <div
+          className={`rounded-xl p-5 border-2 ${
             unrealized != null && unrealized >= 0
-              ? "good"
+              ? "bg-green-50 border-green-200"
               : unrealized != null
-                ? "bad"
-                : undefined
-          }
-        />
+                ? "bg-red-50 border-red-200"
+                : "bg-gray-50 border-gray-200"
+          }`}
+        >
+          <div className="text-sm text-gray-500 mb-1">含み損益</div>
+          {unrealized != null ? (
+            <>
+              <div
+                className={`text-4xl font-extrabold tabular-nums tracking-tight ${
+                  unrealized >= 0 ? "text-green-700" : "text-red-700"
+                }`}
+              >
+                {unrealized >= 0 ? "+" : "-"}¥{Math.abs(unrealized).toLocaleString()}
+              </div>
+              <div className="text-xs text-gray-500 mt-2">
+                取得額合計 ¥{totalAcquired.toLocaleString()}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-2xl font-bold text-gray-400 mt-1">-</div>
+              <div className="text-xs text-gray-400 mt-2">
+                カード詳細ページの「取得価格」を入力すると表示されます
+              </div>
+            </>
+          )}
+        </div>
       </section>
+
+      {/* ブランド別 / グレード別内訳 */}
+      {collectionRows.length > 0 && (
+        <section className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {brandItems.length > 1 && (
+            <div className="bg-white border rounded-xl p-4">
+              <h2 className="text-sm font-bold text-gray-700 mb-3">ブランド別内訳</h2>
+              <div className="space-y-3">
+                {brandItems.map(([brand, { qty, value }]) => {
+                  const pct = totalSell > 0 ? Math.round((value / totalSell) * 100) : 0;
+                  const label = BRAND_LABEL[brand] ?? brand;
+                  const barColor = BRAND_COLOR[brand] ?? "bg-gray-400";
+                  return (
+                    <div key={brand}>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="font-medium">{label}</span>
+                        <span className="text-gray-500 tabular-nums">
+                          ¥{value.toLocaleString()} · {qty}枚 · {pct}%
+                        </span>
+                      </div>
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${barColor} transition-all`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {gradeItems.length > 0 && (
+            <div className="bg-white border rounded-xl p-4">
+              <h2 className="text-sm font-bold text-gray-700 mb-3">グレード別内訳</h2>
+              <div className="space-y-3">
+                {gradeItems.map(([grade, { qty, value }]) => {
+                  const pct = totalSell > 0 ? Math.round((value / totalSell) * 100) : 0;
+                  const label = GRADE_LABEL[grade] ?? grade;
+                  const isGraded = !["raw", "unspecified"].includes(grade);
+                  return (
+                    <div key={grade}>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="font-medium">{label}</span>
+                        <span className="text-gray-500 tabular-nums">
+                          ¥{value.toLocaleString()} · {qty}枚
+                        </span>
+                      </div>
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${isGraded ? "bg-amber-400" : "bg-blue-300"} transition-all`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {collectionRows.length === 0 ? (
         <div className="border border-dashed border-gray-300 rounded p-8 text-center">
@@ -255,32 +362,6 @@ export default async function CollectionPage() {
           })}
         </ul>
       )}
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  sub,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  highlight?: "good" | "bad";
-}) {
-  const cls =
-    highlight === "good"
-      ? "text-green-700"
-      : highlight === "bad"
-        ? "text-red-700"
-        : "text-gray-900";
-  return (
-    <div className="bg-white border rounded-lg p-3">
-      <div className="text-[11px] text-gray-500">{label}</div>
-      <div className={`text-lg font-bold ${cls}`}>{value}</div>
-      {sub && <div className="text-[10px] text-gray-400 mt-0.5">{sub}</div>}
     </div>
   );
 }
