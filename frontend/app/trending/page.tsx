@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Suspense } from "react";
+import { Suspense, Fragment } from "react";
 import type { Metadata } from "next";
+import AdUnit from "../../components/AdUnit";
 import { getTrending, type TrendingCard } from "../../lib/api";
 
 // force-dynamic 外して ISR 効かせる。ranking は 10分で十分鮮度OK
@@ -293,56 +294,65 @@ async function TrendingListSection({
         const code = `${c.set_code}-${c.card_no}`;
         const up = c.pct_change >= 0;
         const diff = c.now_price - c.past_price;
+        const adPosition = Math.floor((i + 1) / 10);
+        const showAd = (i + 1) % 10 === 0 && adPosition <= 3 && i < display.length - 1;
         return (
-          <li key={c.card_id}>
-            <Link
-              href={`/cards/${code}`}
-              className="flex items-center gap-3 p-3 border rounded-lg hover:shadow-md transition-shadow bg-white"
-            >
-              <div className="w-8 text-center text-sm font-bold text-gray-500">
-                {i + 1}
-              </div>
-              {c.image_url ? (
-                <img
-                  src={c.image_url}
-                  alt={c.name_ja}
-                  className="w-12 h-auto rounded"
-                  loading="lazy"
-                />
-              ) : (
-                <div className="w-12 aspect-[5/7] bg-gray-100 rounded flex items-center justify-center text-[8px] text-gray-400">
-                  No Img
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold truncate">{c.name_ja}</div>
-                <div className="text-xs text-gray-500">
-                  {code} · {VARIANT_LABEL[c.variant] ?? c.variant} · {c.rarity}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm font-semibold">
-                  ¥{Math.round(c.now_price).toLocaleString()}
-                </div>
-                <div className="text-xs text-gray-500">
-                  前: ¥{Math.round(c.past_price).toLocaleString()}
-                </div>
-              </div>
-              <div
-                className={`text-right min-w-[80px] font-bold ${
-                  up ? "text-red-600" : "text-blue-600"
-                }`}
+          <Fragment key={c.card_id}>
+            <li>
+              <Link
+                href={`/cards/${code}`}
+                className="flex items-center gap-3 p-3 border rounded-lg hover:shadow-md transition-shadow bg-white"
               >
-                <div className="text-base">
-                  {up ? "+" : ""}
-                  {c.pct_change.toFixed(1)}%
+                <div className="w-8 text-center text-sm font-bold text-gray-500">
+                  {i + 1}
                 </div>
-                <div className="text-xs">
-                  {up ? "+" : ""}¥{Math.round(diff).toLocaleString()}
+                {c.image_url ? (
+                  <img
+                    src={c.image_url}
+                    alt={c.name_ja}
+                    className="w-12 h-auto rounded"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="w-12 aspect-[5/7] bg-gray-100 rounded flex items-center justify-center text-[8px] text-gray-400">
+                    No Img
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold truncate">{c.name_ja}</div>
+                  <div className="text-xs text-gray-500">
+                    {code} · {VARIANT_LABEL[c.variant] ?? c.variant} · {c.rarity}
+                  </div>
                 </div>
-              </div>
-            </Link>
-          </li>
+                <div className="text-right">
+                  <div className="text-sm font-semibold">
+                    ¥{Math.round(c.now_price).toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    前: ¥{Math.round(c.past_price).toLocaleString()}
+                  </div>
+                </div>
+                <div
+                  className={`text-right min-w-[80px] font-bold ${
+                    up ? "text-red-600" : "text-blue-600"
+                  }`}
+                >
+                  <div className="text-base">
+                    {up ? "+" : ""}
+                    {c.pct_change.toFixed(1)}%
+                  </div>
+                  <div className="text-xs">
+                    {up ? "+" : ""}¥{Math.round(diff).toLocaleString()}
+                  </div>
+                </div>
+              </Link>
+            </li>
+            {showAd && (
+              <li className="py-2">
+                <AdUnit slot="7388186374" format="auto" />
+              </li>
+            )}
+          </Fragment>
         );
       })}
     </ol>
