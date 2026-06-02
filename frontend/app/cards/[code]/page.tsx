@@ -650,9 +650,7 @@ export default async function CardDetailPage({
       </section>
 
       {/* 広告: PSA シミュレーターの直前 */}
-      {process.env.NEXT_PUBLIC_ADSENSE_SLOT_CARD && (
-        <AdUnit slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_CARD} className="my-6" />
-      )}
+      <AdUnit slot="2850175565" className="my-6" />
 
       {/* PSA10提出 損益シミュレーター (独自軸) */}
       <Psa10Simulator

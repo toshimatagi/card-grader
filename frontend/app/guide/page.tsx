@@ -69,9 +69,7 @@ export default function GuidePage() {
       </section>
 
       {/* 広告: 目次の直後 */}
-      {process.env.NEXT_PUBLIC_ADSENSE_SLOT_GUIDE && (
-        <AdUnit slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_GUIDE} className="mb-8" />
-      )}
+      <AdUnit slot="7852736171" className="mb-8" />
 
       {/* 1. 概要 */}
       <section id="overview" className="mb-10">
