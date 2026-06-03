@@ -6,8 +6,6 @@ import { type CardSummary } from "../../lib/api";
 import RemoveButtonClient from "../../components/collection/RemoveButtonClient";
 import SellButton from "../../components/collection/SellButton";
 
-export const dynamic = "force-dynamic";
-
 export const metadata = {
   title: "マイコレクション",
   robots: { index: false, follow: false },
