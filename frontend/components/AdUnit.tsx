@@ -7,6 +7,7 @@ const ADSENSE_CLIENT_ID = "ca-pub-5248501271307957";
 interface AdUnitProps {
   slot: string;
   format?: "auto" | "fluid" | "rectangle" | "vertical" | "horizontal";
+  layoutKey?: string; // インフィード広告に必要
   responsive?: boolean;
   className?: string;
 }
@@ -14,6 +15,7 @@ interface AdUnitProps {
 export default function AdUnit({
   slot,
   format = "auto",
+  layoutKey,
   responsive = true,
   className = "",
 }: AdUnitProps) {
@@ -22,7 +24,6 @@ export default function AdUnit({
   useEffect(() => {
     const ins = insRef.current;
     if (!ins) return;
-    // AdSense が処理済みの場合は再 push しない
     if (ins.getAttribute("data-adsbygoogle-status") === "done") return;
     try {
       ((window as any).adsbygoogle = (window as any).adsbygoogle || []).push({});
@@ -38,6 +39,7 @@ export default function AdUnit({
         data-ad-client={ADSENSE_CLIENT_ID}
         data-ad-slot={slot}
         data-ad-format={format}
+        {...(layoutKey ? { "data-ad-layout-key": layoutKey } : {})}
         data-full-width-responsive={responsive ? "true" : "false"}
       />
     </div>
