@@ -96,32 +96,47 @@ export default async function CollectionPage({
   const collectionRows: CollectionRow[] = colData ?? [];
   const salesRows: SaleRow[] = saleData ?? [];
 
-  // カード情報をまとめて取得
-  const allCardIds = Array.from(new Set([
-    ...collectionRows.map((r) => r.card_id),
-    ...salesRows.map((r) => r.card_id).filter((id): id is string => id != null),
-  ]));
+  const collectionCardIds = Array.from(new Set(collectionRows.map((r) => r.card_id)));
+  // 売却済みカードのうちコレクションに含まれないIDのみ（名前・画像の表示用、価格取得不要）
+  const collectionCardIdSet = new Set(collectionCardIds);
+  const salesOnlyCardIds = Array.from(new Set(
+    salesRows.map((r) => r.card_id).filter((id): id is string => id != null && !collectionCardIdSet.has(id))
+  ));
 
   let cardMap = new Map<string, CardSummaryWithPrice>();
   const gradePriceMap = new Map<string, number>();
 
-  if (allCardIds.length > 0) {
+  // コレクションカード: 価格付きで取得（評価額・損益の計算に必要）
+  if (collectionCardIds.length > 0) {
     try {
       const baseCards = await sbGet<CardSummary[]>(
         "cards",
-        `select=id,brand,set_code,card_no,variant,rarity,name_ja,image_url&id=in.(${allCardIds.join(",")})`,
+        `select=id,brand,set_code,card_no,variant,rarity,name_ja,image_url&id=in.(${collectionCardIds.join(",")})`,
       );
       const withPrice = await attachLatestPrices(baseCards);
-      cardMap = new Map(withPrice.map((c) => [c.id, c]));
+      for (const c of withPrice) cardMap.set(c.id, c);
       const gradeRows = await sbGet<{ card_id: string; grade: string; price_median: number | null }[]>(
         "card_grade_prices_latest",
-        `card_id=in.(${allCardIds.join(",")})&select=card_id,grade,price_median`,
+        `card_id=in.(${collectionCardIds.join(",")})&select=card_id,grade,price_median`,
       );
       for (const r of gradeRows) {
         if (r.price_median != null) gradePriceMap.set(`${r.card_id}:${r.grade}`, r.price_median);
       }
     } catch {
-      cardMap = new Map();
+      // cardMap は空のまま継続
+    }
+  }
+
+  // 売却済み専用カード: 名前・画像の表示だけ必要（価格取得なし）
+  if (salesOnlyCardIds.length > 0) {
+    try {
+      const salesCards = await sbGet<CardSummary[]>(
+        "cards",
+        `select=id,brand,set_code,card_no,variant,rarity,name_ja,image_url&id=in.(${salesOnlyCardIds.join(",")})`,
+      );
+      for (const c of salesCards) cardMap.set(c.id, { ...c, sell_price: null, buy_price: null });
+    } catch {
+      // 表示できなくても継続
     }
   }
 
