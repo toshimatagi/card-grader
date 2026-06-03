@@ -24,7 +24,7 @@ import { getPokemonSetMeta } from "../../../lib/pokemonSets";
 import { getOnePieceSetMeta } from "../../../lib/onepieceSets";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 
-export const dynamic = "force-dynamic";
+// force-dynamic を外す → cookies() で動的レンダリングは維持しつつ、sbGet の revalidate:60 キャッシュが有効になる
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
 
