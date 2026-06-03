@@ -2,11 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "../../lib/supabase/server";
 import { sbGet } from "../../lib/supabase";
-import {
-  attachLatestPrices,
-  type CardSummary,
-  type CardSummaryWithPrice,
-} from "../../lib/api";
+import { type CardSummary } from "../../lib/api";
 import RemoveButtonClient from "../../components/collection/RemoveButtonClient";
 import SellButton from "../../components/collection/SellButton";
 
@@ -96,54 +92,44 @@ export default async function CollectionPage({
   const collectionRows: CollectionRow[] = colData ?? [];
   const salesRows: SaleRow[] = saleData ?? [];
 
+  // 全カードIDを収集（コレクション + 売却済み）
+  const allCardIds = Array.from(new Set([
+    ...collectionRows.map((r) => r.card_id),
+    ...salesRows.map((r) => r.card_id).filter((id): id is string => id != null),
+  ]));
   const collectionCardIds = Array.from(new Set(collectionRows.map((r) => r.card_id)));
-  // 売却済みカードのうちコレクションに含まれないIDのみ（名前・画像の表示用、価格取得不要）
-  const collectionCardIdSet = new Set(collectionCardIds);
-  const salesOnlyCardIds = Array.from(new Set(
-    salesRows.map((r) => r.card_id).filter((id): id is string => id != null && !collectionCardIdSet.has(id))
-  ));
 
-  let cardMap = new Map<string, CardSummaryWithPrice>();
+  const cardMap = new Map<string, CardSummary & { sell_price: number | null; buy_price: number | null }>();
   const gradePriceMap = new Map<string, number>();
 
-  // コレクションカード: 価格付きで取得（評価額・損益の計算に必要）
-  if (collectionCardIds.length > 0) {
+  if (allCardIds.length > 0) {
     try {
-      const baseCards = await sbGet<CardSummary[]>(
-        "cards",
-        `select=id,brand,set_code,card_no,variant,rarity,name_ja,image_url&id=in.(${collectionCardIds.join(",")})`,
-      );
-      const withPrice = await attachLatestPrices(baseCards);
-      for (const c of withPrice) cardMap.set(c.id, c);
-      const gradeRows = await sbGet<{ card_id: string; grade: string; price_median: number | null }[]>(
-        "card_grade_prices_latest",
-        `card_id=in.(${collectionCardIds.join(",")})&select=card_id,grade,price_median`,
-      );
+      // カード基本情報 と グレード別価格 を並列取得（attachLatestPricesは使わない）
+      const [cards, gradeRows] = await Promise.all([
+        sbGet<CardSummary[]>(
+          "cards",
+          `select=id,brand,set_code,card_no,variant,rarity,name_ja,image_url&id=in.(${allCardIds.join(",")})`,
+        ),
+        collectionCardIds.length > 0
+          ? sbGet<{ card_id: string; grade: string; price_median: number | null }[]>(
+              "card_grade_prices_latest",
+              `card_id=in.(${collectionCardIds.join(",")})&select=card_id,grade,price_median`,
+            )
+          : Promise.resolve([]),
+      ]);
+      for (const c of cards) cardMap.set(c.id, { ...c, sell_price: null, buy_price: null });
       for (const r of gradeRows) {
         if (r.price_median != null) gradePriceMap.set(`${r.card_id}:${r.grade}`, r.price_median);
       }
     } catch {
-      // cardMap は空のまま継続
+      // 取得失敗時は空のまま表示継続
     }
   }
 
-  // 売却済み専用カード: 名前・画像の表示だけ必要（価格取得なし）
-  if (salesOnlyCardIds.length > 0) {
-    try {
-      const salesCards = await sbGet<CardSummary[]>(
-        "cards",
-        `select=id,brand,set_code,card_no,variant,rarity,name_ja,image_url&id=in.(${salesOnlyCardIds.join(",")})`,
-      );
-      for (const c of salesCards) cardMap.set(c.id, { ...c, sell_price: null, buy_price: null });
-    } catch {
-      // 表示できなくても継続
-    }
-  }
-
-  function priceForGrade(cardId: string, grade: string, fallbackSell: number | null): number | null {
-    if (grade === "unspecified") return fallbackSell;
-    if (grade === "raw") return gradePriceMap.get(`${cardId}:raw`) ?? fallbackSell;
-    return gradePriceMap.get(`${cardId}:${grade}`) ?? fallbackSell;
+  // grade_price_latest の raw/grade を使って評価額を算出
+  function priceForGrade(cardId: string, grade: string): number | null {
+    if (grade === "unspecified") return gradePriceMap.get(`${cardId}:raw`) ?? null;
+    return gradePriceMap.get(`${cardId}:${grade}`) ?? null;
   }
 
   // 保有中の集計
@@ -155,7 +141,7 @@ export default async function CollectionPage({
     const c = cardMap.get(r.card_id);
     if (!c) continue;
     totalQuantity += r.quantity;
-    const p = priceForGrade(r.card_id, r.grade, c.sell_price);
+    const p = priceForGrade(r.card_id, r.grade);
     const rowValue = p != null ? p * r.quantity : 0;
     if (p != null) { totalSell += rowValue; valuedQuantity += r.quantity; }
     if (r.acquired_price != null) totalAcquired += r.acquired_price * r.quantity;
@@ -342,7 +328,7 @@ export default async function CollectionPage({
             {collectionRows.map((r) => {
               const c = cardMap.get(r.card_id);
               const code = c ? `${c.set_code}-${c.card_no}` : "削除済";
-              const unitPrice = c ? priceForGrade(r.card_id, r.grade, c.sell_price) : null;
+              const unitPrice = c ? priceForGrade(r.card_id, r.grade) : null;
               const acquiredTotal = r.acquired_price ? r.acquired_price * r.quantity : null;
               const sellTotal = unitPrice != null ? unitPrice * r.quantity : null;
               const diff = acquiredTotal != null && sellTotal != null ? sellTotal - acquiredTotal : null;
