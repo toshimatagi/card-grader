@@ -349,7 +349,7 @@ async function TrendingListSection({
             </li>
             {showAd && (
               <li className="py-2">
-                <AdUnit slot="7388186374" format="fluid" layoutKey="-i1+5-c-29+58" />
+                <AdUnit slot="7119599814" />
               </li>
             )}
           </Fragment>
