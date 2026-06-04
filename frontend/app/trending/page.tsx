@@ -4,8 +4,7 @@ import type { Metadata } from "next";
 import AdUnit from "../../components/AdUnit";
 import { getTrending, type TrendingCard } from "../../lib/api";
 
-// force-dynamic 外して ISR 効かせる。ranking は 10分で十分鮮度OK
-export const revalidate = 600; // 10分
+export const dynamic = "force-dynamic"; // ISR キャッシュをバイパス（広告スロット変更後に一時設定）
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
 
