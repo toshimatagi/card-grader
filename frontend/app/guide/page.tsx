@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import AdUnit from "../../components/AdUnit";
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://tcg-authority.com";
+
 export const metadata: Metadata = {
   title: "使い方 - TCG Authority 利用ガイド",
   description:
@@ -13,9 +15,69 @@ export const metadata: Metadata = {
   },
 };
 
+const GUIDE_FAQ = [
+  {
+    q: "鑑定結果は PSA / BGS の実際の鑑定と一致しますか?",
+    a: "本ツールは PSA の基準を参考にした自動分析ですが、実際の PSA / BGS では専門家が目視で判定するため結果が異なる場合があります。あくまで提出前のセルフチェック・目安としてご利用ください。",
+  },
+  {
+    q: "鑑定に時間がかかります",
+    a: "鑑定APIサーバーが Render の Free プランでアイドル時にスリープするため、初回アクセス時は起動に30〜60秒かかる場合があります。2回目以降は通常 5〜15秒 で完了します。",
+  },
+  {
+    q: "スリーブやケースに入れたまま鑑定できますか?",
+    a: "スリーブの反射や歪みが傷として誤検出される可能性があるため、できるだけ裸の状態で撮影してください。",
+  },
+  {
+    q: "裏面の鑑定はできますか?",
+    a: "対応しています。表面+裏面の2枚をアップロードすると、裏面の角欠け・白かけ・センタリングも判定に含まれます。PSA / BGS は表裏のうち悪い方が採用されるため、両面チェックを推奨します。",
+  },
+  {
+    q: "アップロードした画像はどうなりますか?",
+    a: "鑑定結果と画像は Supabase Storage に保存され、履歴ページから再閲覧できます。履歴ページから個別に削除も可能です。",
+  },
+  {
+    q: "価格DBの更新頻度はどれくらい?",
+    a: "現役の主要セット (ワンピ最新ブースター・ポケカ MEGA シリーズ) は1時間おき、それ以外のセットは1日1回 (深夜) に自動更新します。",
+  },
+  {
+    q: "ポケカの最新弾 (M04 等) は対応していますか?",
+    a: "ポケモンカードは MEGA シリーズ (M3 / M4 / M2a) と SV シリーズの全カードを収録しています。新弾発売後は自動でセット一覧に追加されます。",
+  },
+  {
+    q: "AI識別が間違った型番を出すことがあります",
+    a: "AI識別 (Gemini) はカード写真から型番・レアリティを推定しますが、撮影角度・反射・解像度により誤識別することがあります。確度が低い場合は手動で型番入力・候補選択をお使いください。",
+  },
+  {
+    q: "ソースになる取扱いサイトを教えてください",
+    a: "差別化要素のため公開しておりません。複数の国内通販サイトから集計した中央値を表示しています。",
+  },
+];
+
 export default function GuidePage() {
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "ホーム", item: SITE_URL },
+      { "@type": "ListItem", position: 2, name: "使い方ガイド", item: `${SITE_URL}/guide` },
+    ],
+  };
+
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: GUIDE_FAQ.map((f) => ({
+      "@type": "Question",
+      name: f.q,
+      acceptedAnswer: { "@type": "Answer", text: f.a },
+    })),
+  };
+
   return (
     <div className="max-w-3xl mx-auto">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
       <h1 className="text-3xl font-bold mb-2">利用ガイド</h1>
       <p className="text-gray-500 text-sm mb-8">
         TCG Authority (ワンピカード・ポケカ 価格DB & AI鑑定ツール) の使い方
@@ -367,44 +429,7 @@ export default function GuidePage() {
       <section id="faq" className="mb-10">
         <h2 className="text-xl font-bold mb-3 border-b pb-2">9. よくある質問</h2>
         <div className="space-y-3">
-          {[
-            {
-              q: "鑑定結果は PSA / BGS の実際の鑑定と一致しますか?",
-              a: "本ツールは PSA の基準を参考にした自動分析ですが、実際の PSA / BGS では専門家が目視で判定するため結果が異なる場合があります。あくまで提出前のセルフチェック・目安としてご利用ください。",
-            },
-            {
-              q: "鑑定に時間がかかります",
-              a: "鑑定APIサーバーが Render の Free プランでアイドル時にスリープするため、初回アクセス時は起動に30〜60秒かかる場合があります。2回目以降は通常 5〜15秒 で完了します。",
-            },
-            {
-              q: "スリーブやケースに入れたまま鑑定できますか?",
-              a: "スリーブの反射や歪みが傷として誤検出される可能性があるため、できるだけ裸の状態で撮影してください。",
-            },
-            {
-              q: "裏面の鑑定はできますか?",
-              a: "対応しています。表面+裏面の2枚をアップロードすると、裏面の角欠け・白かけ・センタリングも判定に含まれます。PSA / BGS は表裏のうち悪い方が採用されるため、両面チェックを推奨します。",
-            },
-            {
-              q: "アップロードした画像はどうなりますか?",
-              a: "鑑定結果と画像は Supabase Storage に保存され、履歴ページから再閲覧できます。履歴ページから個別に削除も可能です。",
-            },
-            {
-              q: "価格DBの更新頻度はどれくらい?",
-              a: "現役の主要セット (ワンピ最新ブースター・ポケカ MEGA シリーズ) は1時間おき、それ以外のセットは1日1回 (深夜) に自動更新します。",
-            },
-            {
-              q: "ポケカの最新弾 (M04 等) は対応していますか?",
-              a: "ポケモンカードは MEGA シリーズ (M3 / M4 / M2a) と SV シリーズの全カードを収録しています。新弾発売後は自動でセット一覧に追加されます。",
-            },
-            {
-              q: "AI識別が間違った型番を出すことがあります",
-              a: "AI識別 (Gemini) はカード写真から型番・レアリティを推定しますが、撮影角度・反射・解像度により誤識別することがあります。確度が低い場合は手動で型番入力・候補選択をお使いください。",
-            },
-            {
-              q: "ソースになる取扱いサイトを教えてください",
-              a: "差別化要素のため公開しておりません。複数の国内通販サイトから集計した中央値を表示しています。",
-            },
-          ].map((item, i) => (
+          {GUIDE_FAQ.map((item, i) => (
             <details key={i} className="border rounded-lg [&_summary::-webkit-details-marker]:hidden">
               <summary className="p-4 cursor-pointer font-medium hover:bg-gray-50 flex items-center justify-between gap-2">
                 <span>{item.q}</span>

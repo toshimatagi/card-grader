@@ -68,6 +68,16 @@ export default function GuideKanteiTeisyutsu() {
     })),
   };
 
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "ホーム", item: SITE_URL },
+      { "@type": "ListItem", position: 2, name: "使い方ガイド", item: `${SITE_URL}/guide` },
+      { "@type": "ListItem", position: 3, name: "鑑定提出マニュアル", item: `${SITE_URL}/guide/kantei-teisyutsu` },
+    ],
+  };
+
   const articleJsonLd = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -81,6 +91,7 @@ export default function GuideKanteiTeisyutsu() {
 
   return (
     <article>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }} />
 

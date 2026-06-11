@@ -142,6 +142,16 @@ export default async function CardsLandingPage() {
   const opCardCount = opSets.reduce((s, x) => s + x.count, 0);
   const pkmCardCount = pkmSets.reduce((s, x) => s + x.count, 0);
 
+  // BreadcrumbList JSON-LD
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "ホーム", item: SITE_URL },
+      { "@type": "ListItem", position: 2, name: "価格DB", item: `${SITE_URL}/cards` },
+    ],
+  };
+
   // FAQPage JSON-LD
   const faqJsonLd = {
     "@context": "https://schema.org",
@@ -189,6 +199,7 @@ export default async function CardsLandingPage() {
 
   return (
     <div>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}

@@ -69,6 +69,16 @@ export default function GuideMercari() {
     })),
   };
 
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "ホーム", item: SITE_URL },
+      { "@type": "ListItem", position: 2, name: "使い方ガイド", item: `${SITE_URL}/guide` },
+      { "@type": "ListItem", position: 3, name: "メルカリ高額売却術", item: `${SITE_URL}/guide/mercari-takaku-uru` },
+    ],
+  };
+
   const articleJsonLd = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -82,6 +92,7 @@ export default function GuideMercari() {
 
   return (
     <article>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }} />
 
