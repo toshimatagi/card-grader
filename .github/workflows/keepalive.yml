@@ -22,3 +22,14 @@ jobs:
             code=$(curl -s -o /dev/null -m 60 -w "%{http_code} | %{time_total}s" "$url")
             echo "$code | $url"
           done
+
+      - name: Ping Supabase (auto-pause 防止)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          code=$(curl -s -o /dev/null -m 30 -w "%{http_code} | %{time_total}s" \
+            "${SUPABASE_URL}/rest/v1/card_prices?limit=1&select=id" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}")
+          echo "$code | supabase"
