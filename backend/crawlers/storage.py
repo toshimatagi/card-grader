@@ -132,7 +132,6 @@ async def insert_snapshot(
         "price_type": price_type,
         "price": price,
         "stock_status": stock_status,
-        "raw": raw,
     }
     url = f"{SUPABASE_URL}/rest/v1/price_snapshots"
     headers = _headers("return=minimal")
