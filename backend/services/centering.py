@@ -1,10 +1,15 @@
-"""センタリング分析モジュール（v3: ブランド既知ボーダー比率ガイド方式）
+"""センタリング分析モジュール（v4: AXCI 方式 + 分散ベース検出）
 
 方針:
   v1: カード画像の端からの絶対距離でボーダーを測定 → 撮影角度に依存
   v2: 外枠と内枠の中心ズレで判定 → 内枠検出精度に依存
   v3: ブランドごとの既知ボーダー比率を「期待位置」として使い、
       その周辺でエッジを精密探索 → 安定性が大幅に向上
+  v4: AXCI 方式採用 — 辺中央 15% の測定点のみで走査し、
+      ピクセル分散の急増（ボーダー→絵柄の遷移）を検出。
+      色に依存しないため白・金・虹・グラデーション・左右色違い全対応。
+      サブピクセル補間（放物線フィッティング）で接戦精度向上。
+      outer_rect を外部から渡せるようにし、透視変換後の再検出をスキップ。
 """
 
 import cv2
@@ -12,7 +17,8 @@ import numpy as np
 
 
 def analyze_centering(card_image: np.ndarray, mode: str = "bordered",
-                      border_ratios: dict | None = None) -> dict:
+                      border_ratios: dict | None = None,
+                      outer_rect: tuple | None = None) -> dict:
     """
     カードのセンタリングを分析する。
 
@@ -21,11 +27,14 @@ def analyze_centering(card_image: np.ndarray, mode: str = "bordered",
         mode: "bordered" | "borderless" | "gold_border" | "thin_border"
         border_ratios: ブランド既知ボーダー比率
             {"lr": 0.045, "top": 0.035, "bottom": 0.065}
+        outer_rect: カード外枠 (x, y, w, h)。指定時は外枠再検出をスキップ。
+            透視変換後の自動鑑定では (0, 0, img_w, img_h) を渡す。
     """
     h, w = card_image.shape[:2]
 
-    # カード外縁の矩形
-    outer_rect = _detect_outer_boundary(card_image)
+    # outer_rect が渡された場合は再検出をスキップ（透視変換後は不要）
+    if outer_rect is None:
+        outer_rect = _detect_outer_boundary(card_image)
 
     if mode == "borderless":
         inner_rect = _detect_borderless_inner(card_image, outer_rect)
@@ -260,14 +269,11 @@ def _detect_guided_inner(image: np.ndarray, outer_rect: tuple,
     expected_top = int(rh * ratios["top"])
     expected_bottom = int(rh * ratios["bottom"])
 
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
-
-    # 各辺のボーダー幅を精密検出
-    left_border = _refine_border(edges, "left", expected_lr, rw, rh)
-    right_border = _refine_border(edges, "right", expected_lr, rw, rh)
-    top_border = _refine_border(edges, "top", expected_top, rw, rh)
-    bottom_border = _refine_border(edges, "bottom", expected_bottom, rw, rh)
+    # v4: AXCI 方式 — 分散ベース境界検出（色に依存しない）
+    left_border = _refine_border_variance(roi, "left", expected_lr, rw, rh)
+    right_border = _refine_border_variance(roi, "right", expected_lr, rw, rh)
+    top_border = _refine_border_variance(roi, "top", expected_top, rw, rh)
+    bottom_border = _refine_border_variance(roi, "bottom", expected_bottom, rw, rh)
 
     ix = ox + left_border
     iy = oy + top_border
@@ -276,76 +282,82 @@ def _detect_guided_inner(image: np.ndarray, outer_rect: tuple,
 
     # サニティチェック
     if iw < ow * 0.5 or ih < oh * 0.5:
-        # 検出結果がおかしい場合は期待値をそのまま使用
         return (ox + expected_lr, oy + expected_top,
-                ow - 2 * expected_lr, oh - expected_top - expected_bottom)
+                float(ow - 2 * expected_lr), float(oh - expected_top - expected_bottom))
 
     return (ix, iy, iw, ih)
 
 
-def _refine_border(edges: np.ndarray, direction: str,
-                   expected: int, w: int, h: int) -> int:
+def _refine_border_variance(roi: np.ndarray, direction: str,
+                             expected: int, w: int, h: int) -> float:
     """
-    期待位置の周辺でエッジを探索し、ボーダー幅を精密に決定する。
+    v4 AXCI 方式: 中央点測定 + 局所分散ベースのボーダー幅精密検出。
 
-    探索範囲: expected * 0.5 ~ expected * 1.5
+    カードの均一なボーダー → 複雑な絵柄への遷移を、
+    辺中央 15% の測定点でのピクセル分散急増として検出する。
+    色に依存しないため白・金・虹・グラデーション・左右色違い全対応。
+    放物線フィッティングによるサブピクセル補間で接戦精度も向上。
     """
-    search_min = max(2, int(expected * 0.5))
-    search_max = min(int(expected * 1.5), int(min(w, h) * 0.15))
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi.copy()
 
+    # 測定ウィンドウ: 辺の中央 15% のみ（AXCI 方式: 絵柄に邪魔されない帯域）
+    if direction in ("left", "right"):
+        y_start, y_end = int(h * 0.425), int(h * 0.575)
+    else:
+        x_start, x_end = int(w * 0.425), int(w * 0.575)
+
+    # 探索範囲: 期待値の 30% ~ 200% に拡張
+    search_min = max(2, int(expected * 0.30))
+    search_max = min(int(expected * 2.0), int(min(w, h) * 0.22))
     if search_max <= search_min:
-        return expected
+        return float(expected)
 
-    # 探索範囲のエッジ密度プロファイルを取得
-    densities = []
+    positions = list(range(search_min, search_max + 1))
+    variances: list[float] = []
 
-    for pos in range(search_min, search_max + 1):
+    for pos in positions:
         if direction == "left":
-            # 左辺: 縦方向の中央60%を使用
-            y_start, y_end = int(h * 0.2), int(h * 0.8)
-            strip = edges[y_start:y_end, pos]
+            strip = gray[y_start:y_end, pos].astype(float)
         elif direction == "right":
-            col = w - 1 - pos
-            y_start, y_end = int(h * 0.2), int(h * 0.8)
-            strip = edges[y_start:y_end, col]
+            strip = gray[y_start:y_end, w - 1 - pos].astype(float)
         elif direction == "top":
-            x_start, x_end = int(w * 0.2), int(w * 0.8)
-            strip = edges[pos, x_start:x_end]
+            strip = gray[pos, x_start:x_end].astype(float)
         else:  # bottom
-            row = h - 1 - pos
-            x_start, x_end = int(w * 0.2), int(w * 0.8)
-            strip = edges[row, x_start:x_end]
+            strip = gray[h - 1 - pos, x_start:x_end].astype(float)
+        variances.append(float(np.var(strip)) if len(strip) > 0 else 0.0)
 
-        density = np.mean(strip > 0) if len(strip) > 0 else 0
-        densities.append(density)
+    if not variances:
+        return float(expected)
 
-    if not densities:
-        return expected
+    var_arr = np.array(variances, dtype=float)
 
-    densities = np.array(densities)
+    # 全体が均一（分散小）→ ボーダー/絵柄の区別困難 → expected を返す
+    if np.max(var_arr) < 20.0:
+        return float(expected)
 
-    # エッジ密度が最大の位置 = ボーダーと内部の境界線
-    # ただし、期待位置に近い方を優先（重み付き）
-    weights = np.ones(len(densities))
-    expected_idx = expected - search_min
-    if 0 <= expected_idx < len(densities):
-        # 期待位置からの距離に応じて重みを減衰
-        for i in range(len(weights)):
-            dist = abs(i - expected_idx)
-            weights[i] = 1.0 / (1.0 + dist * 0.3)
+    # 移動平均で平滑化 → 差分（グラジエント）を計算
+    smoothed = np.convolve(var_arr, np.ones(3) / 3.0, mode="same")
+    gradient = np.diff(smoothed)
 
-    weighted = densities * weights
+    if len(gradient) == 0:
+        return float(expected)
 
-    # 閾値以上のエッジ密度がある位置を探す
-    threshold = np.max(densities) * 0.4
-    candidates = np.where(densities > threshold)[0]
+    # グラジエント最大点 = ボーダー→絵柄の遷移が最も急な点
+    peak_idx = int(np.argmax(gradient))
 
-    if len(candidates) == 0:
-        return expected
+    # サブピクセル補間（放物線フィッティング）
+    if 0 < peak_idx < len(gradient) - 1:
+        g1, g2, g3 = gradient[peak_idx - 1], gradient[peak_idx], gradient[peak_idx + 1]
+        denom = g1 - 2.0 * g2 + g3
+        dx = 0.5 * (g1 - g3) / denom if abs(denom) > 1e-6 else 0.0
+        dx = max(-1.0, min(1.0, dx))
+        result = float(positions[peak_idx]) + dx
+    else:
+        result = float(positions[peak_idx])
 
-    # 期待位置に最も近い候補を選択
-    best_idx = candidates[np.argmin(np.abs(candidates - expected_idx))]
-    result = search_min + best_idx
+    # サニティチェック: 期待値から大きく外れたら expected を返す
+    if abs(result - expected) > expected:
+        return float(expected)
 
     return result
 
@@ -460,8 +472,8 @@ def _generate_overlay(card_image: np.ndarray, outer_rect: tuple,
     overlay = card_image.copy()
     h, w = overlay.shape[:2]
 
-    ox, oy, ow, oh = outer_rect
-    ix, iy, iw, ih = inner_rect
+    ox, oy, ow, oh = (int(v) for v in outer_rect)
+    ix, iy, iw, ih = (int(v) for v in inner_rect)
 
     # 外枠を黄色で描画
     cv2.rectangle(overlay, (ox, oy), (ox + ow, oy + oh), (0, 255, 255), 2)
