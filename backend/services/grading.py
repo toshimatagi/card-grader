@@ -57,10 +57,47 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     image = _resize_if_needed(image, max_side=1200)
 
     # 1. 前処理: カード領域検出
-    # 手動センタリング時はトリミングしない（エディターと同じ画像を使う）
-    use_trim = not (manual_centering and "lr_ratio" in manual_centering)
-    card_data = detect_card(image, trim=use_trim)
-    card_image = card_data["card_image"]
+    # 手動センタリング時は detect_card() の自動透視変換をスキップし、
+    # ユーザーが調整した縮尺・向きをそのまま維持する (_analyze_back_side と同方針)
+    has_manual_lines = bool(manual_centering and "lr_ratio" in manual_centering)
+    warp_corners_front = (manual_centering or {}).get("warp_corners")
+
+    if has_manual_lines and warp_corners_front:
+        # ユーザー指定の4点でパースペクティブ変換のみ適用
+        try:
+            pts = np.array(
+                [
+                    warp_corners_front["tl"], warp_corners_front["tr"],
+                    warp_corners_front["br"], warp_corners_front["bl"],
+                ],
+                dtype=np.float32,
+            )
+            ordered = order_points(pts)
+            width_top = float(np.linalg.norm(ordered[1] - ordered[0]))
+            width_bottom = float(np.linalg.norm(ordered[2] - ordered[3]))
+            max_width = max(int(max(width_top, width_bottom)), 300)
+            height_left = float(np.linalg.norm(ordered[3] - ordered[0]))
+            height_right = float(np.linalg.norm(ordered[2] - ordered[1]))
+            max_height = max(int(max(height_left, height_right)), 420)
+            dst = np.array(
+                [[0, 0], [max_width - 1, 0],
+                 [max_width - 1, max_height - 1], [0, max_height - 1]],
+                dtype=np.float32,
+            )
+            matrix = cv2.getPerspectiveTransform(ordered, dst)
+            card_image = cv2.warpPerspective(image, matrix, (max_width, max_height))
+        except (KeyError, TypeError, ValueError, IndexError) as e:
+            print(f"[WARN] front warp_corners 適用失敗、raw を使用: {e}")
+            card_image = image
+        card_data = {"card_image": card_image, "contour": None, "card_type": card_type}
+    elif has_manual_lines:
+        # 手動センタリング (warp なし) → フロントと同じ raw 画像をそのまま使う
+        card_image = image
+        card_data = {"card_image": card_image, "contour": None, "card_type": card_type}
+    else:
+        # 自動検出 → 従来通り auto-warp & trim
+        card_data = detect_card(image, trim=True)
+        card_image = card_data["card_image"]
 
     # カード画像も処理用にリサイズ（長辺800px上限）
     card_image = _resize_if_needed(card_image, max_side=800)
