@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { CardByCodeResult, PriceConfidence } from "../../lib/api";
+import type { CardByCodeResult, CardGradePrice, PriceConfidence } from "../../lib/api";
+import { GRADE_LABEL, GRADE_DISPLAY_ORDER } from "../../lib/api";
 
 interface Props {
   code: string;
@@ -161,6 +162,85 @@ export default function CardPriceSummary({ code }: Props) {
             ※ 複数の取扱いサイトから集計した中央値
           </p>
         </div>
+      </div>
+
+      {/* グレード別相場 + PSA10 利益計算 */}
+      <GradePriceSection gradePrices={data.gradePrices} rawSellPrice={data.cards[0]?.sell_price ?? null} />
+    </div>
+  );
+}
+
+function GradePriceSection({
+  gradePrices,
+  rawSellPrice,
+}: {
+  gradePrices: CardGradePrice[];
+  rawSellPrice: number | null;
+}) {
+  if (gradePrices.length === 0) return null;
+
+  const byGrade = new Map<string, CardGradePrice>();
+  for (const g of gradePrices) {
+    if (!byGrade.has(g.grade) || (g.price_median ?? 0) > 0) {
+      byGrade.set(g.grade, g);
+    }
+  }
+
+  const displayGrades = GRADE_DISPLAY_ORDER.filter((g) => byGrade.has(g));
+  if (displayGrades.length === 0) return null;
+
+  const psa10 = byGrade.get("psa10");
+  const profit =
+    psa10?.price_median && rawSellPrice
+      ? psa10.price_median - rawSellPrice
+      : null;
+
+  return (
+    <div className="mt-5 pt-4 border-t">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-semibold text-gray-700">グレード別相場</h3>
+        <span className="text-[11px] text-gray-400">eBay / メルカリ 成約中央値</span>
+      </div>
+
+      {/* PSA10 利益バナー */}
+      {profit !== null && (
+        <div className={`mb-3 rounded-lg px-3 py-2 text-sm font-medium flex items-center gap-2 ${
+          profit > 0
+            ? "bg-green-50 text-green-700 border border-green-200"
+            : "bg-gray-50 text-gray-600 border border-gray-200"
+        }`}>
+          <span>{profit > 0 ? "📈" : "📊"}</span>
+          <span>
+            PSA10 にすると Raw より
+            {profit > 0
+              ? ` +¥${profit.toLocaleString()} の上乗せ相場`
+              : ` ¥${Math.abs(profit).toLocaleString()} 差`}
+          </span>
+          {profit > 0 && rawSellPrice && (
+            <span className="text-[11px] font-normal text-green-600">
+              ({Math.round((profit / rawSellPrice) * 100)}% 増)
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {displayGrades.map((grade) => {
+          const g = byGrade.get(grade)!;
+          return (
+            <div key={grade} className="flex-1 min-w-[100px] bg-gray-50 rounded-lg p-2 text-center border">
+              <div className="text-[10px] text-gray-500 mb-0.5 truncate">{GRADE_LABEL[grade]}</div>
+              <div className="text-sm font-bold tabular-nums">
+                {g.price_median != null
+                  ? `¥${g.price_median.toLocaleString()}`
+                  : "-"}
+              </div>
+              {g.sample_count > 0 && (
+                <div className="text-[10px] text-gray-400">{g.sample_count}件</div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

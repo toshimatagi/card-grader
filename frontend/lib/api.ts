@@ -320,6 +320,7 @@ export interface CardVariant {
 export interface CardByCodeResult {
   code: string;
   cards: CardVariant[];
+  gradePrices: CardGradePrice[];
 }
 
 export interface CardSummary {
@@ -576,7 +577,15 @@ export async function getCardByCode(code: string): Promise<CardByCodeResult> {
     };
   });
 
-  return { code: `${setCode}-${cardNo}`, cards: resultCards };
+  const cardIds = cards.map((c) => c.id);
+  let gradePrices: CardGradePrice[] = [];
+  try {
+    gradePrices = await listGradePrices(cardIds);
+  } catch {
+    // grade prices unavailable — show Raw-only UI
+  }
+
+  return { code: `${setCode}-${cardNo}`, cards: resultCards, gradePrices };
 }
 
 function computePriceStats(
