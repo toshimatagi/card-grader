@@ -588,7 +588,7 @@ export default function GradeApp() {
           </div>
 
           <p className="mt-2 text-[11px] text-gray-500 text-center">
-            JPEG / PNG / WebP (推奨: 1000x1400px 以上)。四隅がすべて見えるように撮影してください。
+            JPEG / PNG / WebP (推奨: 1000x1400px 以上)。<strong>背景が少し見えるよう</strong>に撮影すると検出精度が向上します。
           </p>
 
           {/* 裏面なしリスク (表面のみ登録時) */}

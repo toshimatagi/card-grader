@@ -104,6 +104,20 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
 
   return (
     <div className="space-y-6">
+      {/* 低信頼度警告 */}
+      {result.confidence < 0.9 && (
+        <div className="rounded-xl border border-yellow-400 bg-yellow-50 p-4 text-sm text-yellow-900">
+          <div className="font-semibold mb-1">
+            ⚠️ 検出精度が低い可能性があります (信頼度 {(result.confidence * 100).toFixed(0)}%)
+          </div>
+          <ul className="list-disc list-inside space-y-0.5 text-xs leading-snug">
+            <li>カードが画面いっぱいに写っていると輪郭を検出しにくくなります。<strong>背景が少し見える</strong>よう引いて撮影してください。</li>
+            <li>斜め撮影や照明の反射がある場合は、センタリング測定ステップの「📐 傾き調整」で四隅を手動補正してください。</li>
+            <li>スコアはあくまで目安です。信頼度が低い場合は再撮影後に再チェックすることを推奨します。</li>
+          </ul>
+        </div>
+      )}
+
       {/* シェアボタン */}
       {shareUrl && (
         <div className="flex justify-end gap-2">
