@@ -1,15 +1,16 @@
-"""センタリング分析モジュール（v5: Hough 直線変換ベース検出）
+"""センタリング分析モジュール（v6: 白ボーダー走査方式）
 
 方針:
   v1: カード画像の端からの絶対距離でボーダーを測定 → 撮影角度に依存
   v2: 外枠と内枠の中心ズレで判定 → 内枠検出精度に依存
-  v3: ブランドごとの既知ボーダー比率を「期待位置」として使い、
-      その周辺でエッジを精密探索 → 安定性が大幅に向上
-  v4: 分散ベース検出 → search_min 設定が難しく L:2 R:2 などの誤検出が頻発
-  v5: Hough 直線変換を採用。
-      「辺の 35% 以上を横断する長い直線」のみを検出対象とすることで
-      絵柄の短いエッジノイズを根本的に除去する。
-      検出失敗時は期待値（ブランド設定比率）にフォールバックして安定動作。
+  v3: ブランドごとの既知ボーダー比率を「期待位置」として使い Canny エッジ探索
+  v4: 分散ベース検出 → L:2 R:2 などの誤検出が頻発
+  v5: Hough 直線変換 → フルフレーム写真で絵柄の辺を拾い TB=69/31 など外れ値多発
+  v6: 白ボーダー走査方式 (White-border Scan)
+      各辺から内側にピクセルを走査し「白 → 非白」の遷移点をボーダー境界とする。
+      白判定: HSV で S<45 かつ V>160。
+      中央 50% の帯を使うことで四隅のダメージ・丸みの影響を排除。
+      検出結果が期待値の 25%〜400% 範囲外なら Hough フォールバック。
 """
 
 import cv2
@@ -243,44 +244,121 @@ def _boundary_quality(rect: tuple, img_w: int, img_h: int) -> float:
 
 
 # ---------------------------------------------------------------------------
-# v5: Hough 直線変換ガイド方式（コア）
+# v6: 白ボーダー走査方式（コア）+ v5 Hough フォールバック
 # ---------------------------------------------------------------------------
 
 def _detect_guided_inner(image: np.ndarray, outer_rect: tuple,
                          ratios: dict) -> tuple:
     """
-    v5: Hough 直線変換でボーダー境界を検出。
-
-    カードの設計ボーダーは「辺の 35% 以上を横断する長い直線」として現れる。
-    絵柄の短いエッジはこの条件を満たさないため自然に除去される。
-    4辺を独立して検出し、失敗した辺は期待値にフォールバック。
+    v6: 辺ごとに白ボーダー走査を試みる。
+    走査範囲を「期待値の 30%〜280%」に限定し、範囲外は辺単位で Hough にフォールバック。
+    これにより絵柄の白い領域への深入りを防ぎながら、金ボーダー等の非白辺も安全に処理。
     """
     ox, oy, ow, oh = (int(v) for v in outer_rect)
     roi = image[oy:oy + oh, ox:ox + ow]
-    rh, rw = roi.shape[:2]
+    h, w = roi.shape[:2]
+    if h < 40 or w < 40:
+        return _ratio_fallback(ox, oy, ow, oh, ratios)
 
-    expected_lr = int(rw * ratios["lr"])
-    expected_top = int(rh * ratios["top"])
-    expected_bottom = int(rh * ratios["bottom"])
+    exp_lr  = ratios.get("lr",     0.045)
+    exp_top = ratios.get("top",    0.035)
+    exp_bot = ratios.get("bottom", 0.065)
 
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi.copy()
-    edges = cv2.Canny(gray, 30, 100)
+    # 白マスク・Canny エッジを一度だけ計算
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    white = ((hsv[:, :, 1] < 45) & (hsv[:, :, 2] > 160)).astype(np.float32)
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    edges_map = cv2.Canny(gray, 30, 100)
 
-    left_border = _find_border_hough(edges, "left", expected_lr, rw, rh)
-    right_border = _find_border_hough(edges, "right", expected_lr, rw, rh)
-    top_border = _find_border_hough(edges, "top", expected_top, rw, rh)
-    bottom_border = _find_border_hough(edges, "bottom", expected_bottom, rw, rh)
+    expected_px = {
+        "left":   exp_lr  * w,
+        "right":  exp_lr  * w,
+        "top":    exp_top * h,
+        "bottom": exp_bot * h,
+    }
 
-    ix = ox + left_border
-    iy = oy + top_border
-    iw = ow - left_border - right_border
-    ih = oh - top_border - bottom_border
+    borders: dict[str, float] = {}
+    for side in ("left", "right", "top", "bottom"):
+        exp = expected_px[side]
+        result = _scan_white_side(white, side, w, h, exp)
+        if result is None:
+            # この辺だけ Hough フォールバック
+            result = _find_border_hough(edges_map, side, int(exp), w, h)
+        borders[side] = float(result)
 
-    if iw < ow * 0.5 or ih < oh * 0.5:
-        return (ox + expected_lr, oy + expected_top,
-                float(ow - 2 * expected_lr), float(oh - expected_top - expected_bottom))
+    left, right, top, bottom = (
+        borders["left"], borders["right"],
+        borders["top"],  borders["bottom"],
+    )
+    iw = w - int(left) - int(right)
+    ih = h - int(top)  - int(bottom)
+    if iw < w * 0.5 or ih < h * 0.5:
+        return _ratio_fallback(ox, oy, ow, oh, ratios)
 
-    return (ix, iy, iw, ih)
+    return (ox + int(left), oy + int(top), iw, ih)
+
+
+def _scan_white_side(white: np.ndarray, direction: str,
+                     w: int, h: int, expected_px: float) -> float | None:
+    """
+    1辺の白ボーダー走査。
+    走査範囲を expected_px の 30%〜280% に限定し、白→非白の遷移点を返す。
+    走査開始位置が既に非白の場合（白ボーダーなしのカード）は None を返す。
+    """
+    threshold = 0.55  # 55% 以上が白 → まだボーダー内
+    min_p = max(3, int(expected_px * 0.30))
+    max_p = min(int(expected_px * 2.80), int(min(h, w) * 0.18))
+    if min_p >= max_p:
+        return None
+
+    if direction == "left":
+        mid = slice(h // 4, 3 * h // 4)
+        saw_white = False
+        for x in range(min_p, max_p):
+            frac = np.mean(white[mid, x])
+            if frac >= threshold:
+                saw_white = True
+            elif saw_white:
+                return float(x)
+        return None
+    elif direction == "right":
+        mid = slice(h // 4, 3 * h // 4)
+        saw_white = False
+        for x in range(w - min_p, w - max_p - 1, -1):
+            frac = np.mean(white[mid, x])
+            if frac >= threshold:
+                saw_white = True
+            elif saw_white:
+                return float(w - x - 1)
+        return None
+    elif direction == "top":
+        mid = slice(w // 4, 3 * w // 4)
+        saw_white = False
+        for y in range(min_p, max_p):
+            frac = np.mean(white[y, mid])
+            if frac >= threshold:
+                saw_white = True
+            elif saw_white:
+                return float(y)
+        return None
+    else:  # bottom
+        mid = slice(w // 4, 3 * w // 4)
+        saw_white = False
+        for y in range(h - min_p, h - max_p - 1, -1):
+            frac = np.mean(white[y, mid])
+            if frac >= threshold:
+                saw_white = True
+            elif saw_white:
+                return float(h - y - 1)
+        return None
+
+
+def _ratio_fallback(ox: int, oy: int, ow: int, oh: int, ratios: dict) -> tuple:
+    """ブランド既知比率でそのまま内枠を計算（最終フォールバック）"""
+    lr  = int(ow * ratios.get("lr",     0.045))
+    top = int(oh * ratios.get("top",    0.035))
+    bot = int(oh * ratios.get("bottom", 0.065))
+    return (ox + lr, oy + top, ow - 2 * lr, oh - top - bot)
 
 
 def _find_border_hough(edges: np.ndarray, direction: str,
@@ -356,8 +434,8 @@ def _find_border_hough(edges: np.ndarray, direction: str,
             abs_x = (x1 + x2) / 2.0 + region_offset
             border_dist = abs_x if direction == "left" else w - abs_x
 
-        # 外縁に最も近い線を採用（最小ボーダー幅）
-        if best is None or border_dist < best:
+        # 期待値に最も近い線を採用（外縁ではなくボーダー→アート境界を狙う）
+        if best is None or abs(border_dist - expected) < abs(best - expected):
             best = border_dist
 
     if best is None:
