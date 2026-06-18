@@ -141,38 +141,23 @@ export default function GradeApp() {
     setLoading(true);
     setError(null);
     try {
-      const tasks: Promise<unknown>[] = [
-        preprocessImage(file).then((pre) => {
-          // camera 由来は枠合わせ済なので auto-warp で引き延ばされるのを避け
-          // raw 原画像を表示する。upload 由来 (D&D 等) は従来通り auto-warp 結果。
-          if (frontSource === "camera") {
-            setCorrectedImage(`data:image/jpeg;base64,${pre.original_image}`);
-            setOuterBox(null);
-          } else {
-            setCorrectedImage(`data:image/jpeg;base64,${pre.card_image}`);
-            setOuterBox(pre.outer_box ?? null);
-          }
-          setOriginalImage(pre.original_image);
-          setOriginalCorners(pre.original_corners);
-          setOriginalSize(pre.original_size);
-        }),
-      ];
+      // CenteringEditor は元画像 (preview) をそのまま使う。
+      // preprocessing は傾き調整 (PerspectiveEditor) 用に裏で取得するだけ。
+      preprocessImage(file).then((pre) => {
+        setOriginalImage(pre.original_image);
+        setOriginalCorners(pre.original_corners);
+        setOriginalSize(pre.original_size);
+      }).catch(() => {});
+
       if (backFile) {
-        tasks.push(
-          preprocessImage(backFile).then((pre) => {
-            // 裏面はパターンが均一で auto-corner-detection が外しやすく、
-            // 表面と同じく auto-warp で引き延ばされるため、既定では warp を
-            // 適用せず raw 原画像を表示。手動で「傾き調整」を実行した時だけ
-            // 正面化結果に切り替える。
-            setBackCorrectedImage(`data:image/jpeg;base64,${pre.original_image}`);
-            setBackOuterBox(null);
-            setBackOriginalImage(pre.original_image);
-            setBackOriginalCorners(pre.original_corners);
-            setBackOriginalSize(pre.original_size);
-          })
-        );
+        preprocessImage(backFile).then((pre) => {
+          setBackCorrectedImage(`data:image/jpeg;base64,${pre.original_image}`);
+          setBackOriginalImage(pre.original_image);
+          setBackOriginalCorners(pre.original_corners);
+          setBackOriginalSize(pre.original_size);
+        }).catch(() => {});
       }
-      await Promise.all(tasks);
+
       setStep("centering_front");
     } catch (e) {
       setError(e instanceof Error ? e.message : "前処理に失敗しました");
@@ -388,7 +373,6 @@ export default function GradeApp() {
                 return !!r && (!r.has_border || r.border_type === "none");
               })()}
               cardKind={selectedRarity === "l" ? "leader" : "character"}
-              initialOuter={outerBox}
             />
           )}
           {error && (
@@ -443,7 +427,6 @@ export default function GradeApp() {
               onSkip={handleBackSkipCentering}
               fullartMode={false}
               cardKind="character"
-              initialOuter={backOuterBox}
             />
           )}
           {loading && (
