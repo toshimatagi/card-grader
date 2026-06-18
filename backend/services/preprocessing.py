@@ -1,10 +1,12 @@
-"""カード領域検出・前処理モジュール（v2: 余白除去の強化）
+"""カード領域検出・前処理モジュール（v3: 辺ごと独立余白除去）
 
 改善点:
   - 3つの検出手法（エッジ/色差/適応的閾値）のアンサンブル
   - 背景色の自動検出と除去
   - 検出後のタイトクロップ（余白の完全除去）
   - 正面化後にカード外縁を再検出して最終トリミング
+  - v3: _trim_margins を辺ごと独立サンプリング方式に変更
+    → 1辺だけ背景が残るケース (混合平均問題) を正確に処理
 """
 
 import cv2
@@ -273,79 +275,83 @@ def _trim_margins(card_image: np.ndarray) -> np.ndarray:
     """
     正面化後の画像から残存する余白（背景）を除去する。
 
-    手法:
-      1. 四辺の端をスキャンして背景色を検出
-      2. 背景色と異なる領域をカード本体として切り出す
-      3. 最終的にタイトにクロップ
+    v3: 辺ごと独立サンプリング方式。
+    旧実装は4辺を合算平均していたため、1辺だけ背景が残る場合に
+    混合平均が生じて検出が壊れていた。各辺を独立に処理することで
+    「右辺だけ紫背景が残る」等のケースを正確に検出できる。
     """
     h, w = card_image.shape[:2]
     if h < 50 or w < 50:
         return card_image
 
-    gray = cv2.cvtColor(card_image, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(card_image, cv2.COLOR_BGR2HSV).astype(float)
+    sample_px = max(5, int(min(h, w) * 0.03))   # 外側 3% をサンプル
+    scan_px = int(min(h, w) * 0.20)              # 最大 20% まで走査
 
-    # --- 方法A: 各辺からスキャンして大きな色変化を検出 ---
-    scan_depth = int(min(h, w) * 0.15)
+    crop = {"top": 0, "bottom": h, "left": 0, "right": w}
 
-    top = _find_edge_from_side(gray, "top", scan_depth)
-    bottom = h - _find_edge_from_side(gray, "bottom", scan_depth)
-    left = _find_edge_from_side(gray, "left", scan_depth)
-    right = w - _find_edge_from_side(gray, "right", scan_depth)
+    for direction in ("top", "bottom", "left", "right"):
+        # 辺ごとに外側 3% をサンプリングして背景色を独立推定
+        if direction == "top":
+            samp = hsv[:sample_px, :, :]
+        elif direction == "bottom":
+            samp = hsv[h - sample_px:, :, :]
+        elif direction == "left":
+            samp = hsv[:, :sample_px, :]
+        else:
+            samp = hsv[:, w - sample_px:, :]
 
-    # --- 方法B: 背景色マスクからバウンディングボックス ---
-    hsv = cv2.cvtColor(card_image, cv2.COLOR_BGR2HSV)
-    border_size = max(3, int(min(h, w) * 0.01))
+        flat = samp.reshape(-1, 3)
+        bg_h = float(np.median(flat[:, 0]))
+        bg_s = float(np.median(flat[:, 1]))
+        bg_v = float(np.median(flat[:, 2]))
 
-    edge_pixels = np.vstack([
-        hsv[:border_size, :, :].reshape(-1, 3),
-        hsv[h - border_size:, :, :].reshape(-1, 3),
-        hsv[:, :border_size, :].reshape(-1, 3),
-        hsv[:, w - border_size:, :].reshape(-1, 3),
-    ])
+        # サンプルが白っぽい (S≤25 かつ V≥200) = カード自身の白ボーダー
+        # → この辺は背景なし、トリミング不要
+        if bg_s <= 25 and bg_v >= 200:
+            continue
 
-    bg_v_mean = np.mean(edge_pixels[:, 2])
-    bg_v_std = np.std(edge_pixels[:, 2])
-    bg_s_mean = np.mean(edge_pixels[:, 1])
+        # 背景ピクセルマスク（全画素を対象）
+        hue_diff = np.abs(hsv[:, :, 0] - bg_h)
+        hue_diff = np.minimum(hue_diff, 180.0 - hue_diff)
+        is_bg = (
+            (hue_diff < 22) &
+            (np.abs(hsv[:, :, 1] - bg_s) < 45) &
+            (np.abs(hsv[:, :, 2] - bg_v) < 45)
+        )
 
-    # 背景と大きく異なるピクセル = カード内部
-    v_channel = hsv[:, :, 2].astype(float)
-    s_channel = hsv[:, :, 1].astype(float)
+        # 背景が終わる行/列を内側に向かって走査
+        # 行/列の 50% 以上が背景色でなくなった点 = カード開始
+        if direction == "top":
+            for y in range(min(scan_px, h)):
+                if np.mean(is_bg[y, :]) < 0.50:
+                    crop["top"] = y
+                    break
+        elif direction == "bottom":
+            for y in range(h - 1, max(h - scan_px - 1, 0), -1):
+                if np.mean(is_bg[y, :]) < 0.50:
+                    crop["bottom"] = y + 1
+                    break
+        elif direction == "left":
+            for x in range(min(scan_px, w)):
+                if np.mean(is_bg[:, x]) < 0.50:
+                    crop["left"] = x
+                    break
+        else:
+            for x in range(w - 1, max(w - scan_px - 1, 0), -1):
+                if np.mean(is_bg[:, x]) < 0.50:
+                    crop["right"] = x + 1
+                    break
 
-    diff_mask = (
-        (np.abs(v_channel - bg_v_mean) > max(bg_v_std * 2, 20)) |
-        (np.abs(s_channel - bg_s_mean) > 40)
-    ).astype(np.uint8) * 255
+    t, b, l, r = crop["top"], crop["bottom"], crop["left"], crop["right"]
 
-    # モルフォロジーでクリーンアップ
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    diff_mask = cv2.morphologyEx(diff_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    diff_mask = cv2.morphologyEx(diff_mask, cv2.MORPH_OPEN, kernel)
-
-    coords = cv2.findNonZero(diff_mask)
-    if coords is not None and len(coords) > 100:
-        bx, by, bw, bh = cv2.boundingRect(coords)
-        top2, bottom2, left2, right2 = by, by + bh, bx, bx + bw
-    else:
-        top2, bottom2, left2, right2 = 0, h, 0, w
-
-    # 2つの方法の結果を統合（内側を採用＝より積極的にトリミング）
-    final_top = max(top, top2, 0)
-    final_bottom = min(bottom, bottom2, h)
-    final_left = max(left, left2, 0)
-    final_right = min(right, right2, w)
-
-    # サニティチェック（最低でも元の50%は残す）
-    if (final_right - final_left) < w * 0.5:
-        final_left, final_right = 0, w
-    if (final_bottom - final_top) < h * 0.5:
-        final_top, final_bottom = 0, h
-
-    trimmed = card_image[final_top:final_bottom, final_left:final_right]
-
-    # 最小サイズ保証
-    if trimmed.shape[0] < 100 or trimmed.shape[1] < 70:
+    # 過剰トリミング防止（元サイズの 50% 以上を保持）
+    if (r - l) < w * 0.50 or (b - t) < h * 0.50:
         return card_image
 
+    trimmed = card_image[t:b, l:r]
+    if trimmed.shape[0] < 100 or trimmed.shape[1] < 70:
+        return card_image
     return trimmed
 
 
