@@ -145,7 +145,11 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
                 centering_result["detail"]["design_score"] = design_score
                 centering_result["detail"]["design_alignment"] = design_detail
     else:
-        centering_result = analyze_centering(card_image, mode=centering_mode, border_ratios=border_ratios)
+        ch, cw = card_image.shape[:2]
+        centering_result = analyze_centering(
+            card_image, mode=centering_mode, border_ratios=border_ratios,
+            outer_rect=(0, 0, cw, ch),
+        )
     # color を先に走らせて is_holo を取得し、surface/edges に渡してホロ用に閾値を緩める
     color_result = analyze_color(card_image)
     is_holo = bool(color_result.get("detail", {}).get("is_holo"))
@@ -304,7 +308,10 @@ def _analyze_back_side(image_bytes: bytes,
         centering_result = _build_manual_centering_result(manual_centering, card_image)
     else:
         # 裏面は枠のあるカードでも均一なので borderless モードで測定
-        centering_result = analyze_centering(card_image, mode="borderless")
+        bch, bcw = card_image.shape[:2]
+        centering_result = analyze_centering(
+            card_image, mode="borderless", outer_rect=(0, 0, bcw, bch),
+        )
 
     return {
         "card_image": _image_to_base64(card_image),
