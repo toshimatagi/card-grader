@@ -73,12 +73,20 @@ async def debug_gemini():
         ping_status = str(e)
         ping_ok = False
 
+    error_body = ""
+    if not ping_ok:
+        try:
+            error_body = res.text[:300]
+        except Exception:
+            pass
+
     return {
         "key_set": True,
         "key_preview": key_preview,
         "model": GEMINI_MODEL,
         "ping_status": ping_status,
         "ping_ok": ping_ok,
+        "error": error_body if error_body else None,
     }
 
 
