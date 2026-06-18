@@ -74,6 +74,10 @@ export default function GradeApp() {
     setError(null);
     setResult(null);
     setIdentifyResult(null);
+    setCorrectedImage(null);
+    setOriginalImage(null);
+    setOriginalCorners(null);
+    setOriginalSize(null);
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target?.result as string);
     reader.readAsDataURL(f);
@@ -83,6 +87,10 @@ export default function GradeApp() {
     setBackFile(f);
     setBackSource(source);
     setError(null);
+    setBackCorrectedImage(null);
+    setBackOriginalImage(null);
+    setBackOriginalCorners(null);
+    setBackOriginalSize(null);
     const reader = new FileReader();
     reader.onload = (e) => setBackPreview(e.target?.result as string);
     reader.readAsDataURL(f);
