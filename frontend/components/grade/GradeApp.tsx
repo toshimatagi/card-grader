@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { gradeCard, getBrands, preprocessImage, identifyCard, GradeResult, Brand, CardSummary, IdentifyCardResult, CornerPoints } from "../../lib/api";
+import { gradeCard, getBrands, preprocessImage, GradeResult, Brand, CardSummary, IdentifiedCard, CornerPoints } from "../../lib/api";
 import GradeResultView from "../result/GradeResultView";
 import CenteringEditor from "../centering/CenteringEditor";
 import PerspectiveEditor from "../centering/PerspectiveEditor";
@@ -58,10 +58,8 @@ export default function GradeApp() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [selectedCardCode, setSelectedCardCode] = useState<string | null>(null);
 
-  // AI識別 (Gemini)
-  const [identifying, setIdentifying] = useState(false);
-  const [identifyResult, setIdentifyResult] = useState<IdentifyCardResult | null>(null);
-  const [identifyError, setIdentifyError] = useState<string | null>(null);
+  // AI識別 (Geminiによるグレーディング時の識別結果)
+  const [identifyResult, setIdentifyResult] = useState<IdentifiedCard | null>(null);
 
   useEffect(() => {
     getBrands().then(setBrands).catch(() => {});
@@ -70,41 +68,16 @@ export default function GradeApp() {
   const currentBrand = brands.find((b) => b.id === selectedBrand);
   const cardType = currentBrand?.size === "small" ? "small" : "standard";
 
-  const runIdentify = useCallback(async (f: File) => {
-    setIdentifying(true);
-    setIdentifyError(null);
-    setIdentifyResult(null);
-    try {
-      const res = await identifyCard(f);
-      if ("error" in res) {
-        setIdentifyError(res.error);
-        return;
-      }
-      setIdentifyResult(res);
-      // 自動セット (確度 0.4 以上 + マッチあり)
-      if (res.code && res.confidence >= 0.4 && res.matched.length > 0) {
-        const m = res.matched[0];
-        setSelectedCardId(m.id);
-        setSelectedCardCode(`${m.set_code}-${m.card_no}`);
-        setCardName(`${m.name_ja} ${m.set_code}-${m.card_no} ${m.rarity}`);
-      }
-    } catch (e) {
-      setIdentifyError(e instanceof Error ? e.message : "識別失敗");
-    } finally {
-      setIdentifying(false);
-    }
-  }, []);
-
   const handleFile = useCallback((f: File, source: "camera" | "upload" = "upload") => {
     setFile(f);
     setFrontSource(source);
     setError(null);
     setResult(null);
+    setIdentifyResult(null);
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target?.result as string);
     reader.readAsDataURL(f);
-    runIdentify(f);
-  }, [runIdentify]);
+  }, []);
 
   const handleBackFile = useCallback((f: File, source: "camera" | "upload" = "upload") => {
     setBackFile(f);
@@ -220,7 +193,6 @@ export default function GradeApp() {
     setSelectedCardId(null);
     setSelectedCardCode(null);
     setIdentifyResult(null);
-    setIdentifyError(null);
   };
 
   const handlePickCard = (c: CardSummary) => {
@@ -249,6 +221,9 @@ export default function GradeApp() {
         backCentering ?? undefined,
       );
       setResult(res);
+      if (res.identified_card) {
+        setIdentifyResult(res.identified_card);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "エラーが発生しました");
       setStep(backFile ? "centering_back" : "centering_front");
@@ -581,77 +556,31 @@ export default function GradeApp() {
             </div>
           )}
 
-          {/* AI識別結果 */}
-          {preview && (identifying || identifyResult || identifyError) && (
+          {/* AI識別結果 (AIチェックによるグレーディング後に表示) */}
+          {identifyResult && (
             <div className="mt-3 p-3 rounded-lg border bg-gradient-to-r from-purple-50 to-blue-50 border-purple-200">
-              {identifying && (
-                <div className="flex items-center gap-2 text-sm text-purple-700">
-                  <span className="animate-spin inline-block w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full" />
-                  🤖 AI でカードを識別中...
-                </div>
-              )}
-              {!identifying && identifyError && (
-                <div className="flex items-start gap-2 text-xs text-orange-700">
-                  <span>⚠️</span>
-                  <div>
-                    自動識別できませんでした (手動入力で続行できます)
-                    <button
-                      onClick={() => file && runIdentify(file)}
-                      className="ml-2 underline"
-                    >
-                      再試行
-                    </button>
+              <div className="text-sm">
+                {identifyResult.set_code ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-purple-700 font-bold">🤖 AI識別:</span>
+                    <span className="font-medium">
+                      {identifyResult.name_ja} ({identifyResult.set_code}-{identifyResult.card_no})
+                    </span>
+                    {identifyResult.rarity && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">
+                        {identifyResult.rarity}
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-500">
+                      確度 {Math.round(identifyResult.confidence * 100)}%
+                    </span>
                   </div>
-                </div>
-              )}
-              {!identifying && identifyResult && !identifyError && (
-                <div className="text-sm">
-                  {identifyResult.matched.length > 0 ? (
-                    <>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-purple-700 font-bold">🤖 AI識別:</span>
-                        <span className="font-medium">
-                          {identifyResult.name_ja} ({identifyResult.code})
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          確度 {Math.round(identifyResult.confidence * 100)}%
-                        </span>
-                      </div>
-                      {identifyResult.matched.length > 1 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          <span className="text-xs text-gray-600 self-center">
-                            バリアント:
-                          </span>
-                          {identifyResult.matched.map((m) => {
-                            const isPicked = selectedCardId === m.id;
-                            return (
-                              <button
-                                key={m.id}
-                                onClick={() => {
-                                  setSelectedCardId(m.id);
-                                  setSelectedCardCode(`${m.set_code}-${m.card_no}`);
-                                  setCardName(`${m.name_ja} ${m.set_code}-${m.card_no} ${m.rarity}`);
-                                }}
-                                className={`px-2 py-1 text-xs rounded border ${
-                                  isPicked
-                                    ? "bg-purple-600 text-white border-purple-600"
-                                    : "bg-white text-purple-700 border-purple-300 hover:bg-purple-50"
-                                }`}
-                              >
-                                {m.variant} / {m.rarity}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="text-xs text-gray-600">
-                      🤖 型番を読み取れませんでした (手動で型番を入れるか、撮り直してください)
-                    </div>
-                  )}
-                </div>
-              )}
+                ) : (
+                  <div className="text-xs text-gray-600">
+                    🤖 型番を読み取れませんでした
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

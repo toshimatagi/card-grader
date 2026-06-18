@@ -120,6 +120,143 @@ async def identify_card(image_bytes: bytes, mime_type: str = "image/jpeg") -> di
     }
 
 
+_COMBINED_PROMPT = """このトレーディングカード（主にONE PIECE カードゲーム）の画像から、
+カード識別情報とセンタリング（印刷ズレ）を1回で測定してください。
+
+【カード識別】
+カード左下または右下に印字されている型番（例: OP09-050, ST10-013, EB01-001, PRB02-007）と
+カード名・レアリティを読み取ってください。
+
+【センタリング測定】
+カードの「ボーダー（外枠余白）」と「アートフレーム（印刷枠）」の境界を測定し、
+各辺のボーダー幅をカードの幅・高さに対するパーセンテージで示してください。
+
+ワンピースTCGの参考値（標準ボーダー）:
+  左右: 約3.5〜4.5%, 上: 約3.0〜4.0%, 下: 約5.0〜6.5%
+
+以下のJSON形式のみ返してください（説明文不要）:
+{
+  "set_code": "OP09" | "ST10" | "EB01" | null,
+  "card_no": "050" | "013" | null,
+  "name_ja": "ナミ" | null,
+  "rarity": "C" | "UC" | "R" | "SR" | "L" | "SEC" | "SP" | null,
+  "card_confidence": 0.0〜1.0,
+  "left_pct": 左ボーダー幅 (カード幅に対する%),
+  "right_pct": 右ボーダー幅 (カード幅に対する%),
+  "top_pct": 上ボーダー幅 (カード高さに対する%),
+  "bottom_pct": 下ボーダー幅 (カード高さに対する%),
+  "centering_confidence": 測定の確信度 (0.0〜1.0)
+}
+"""
+
+
+def analyze_card_and_centering_ai(card_image_bytes: bytes) -> dict | None:
+    """Gemini Vision でカード識別とセンタリングを1回のリクエストで取得（同期版）。
+
+    Returns:
+        {"identification": {set_code, card_no, name_ja, rarity, confidence},
+         "centering": {left_pct, right_pct, top_pct, bottom_pct, confidence}} or None
+    """
+    if not GEMINI_API_KEY:
+        return None
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": _COMBINED_PROMPT},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64.b64encode(card_image_bytes).decode("ascii"),
+                        }
+                    },
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.1,
+            "responseMimeType": "application/json",
+        },
+    }
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            res = client.post(f"{GEMINI_URL}?key={GEMINI_API_KEY}", json=payload)
+    except Exception as e:
+        print(f"[Gemini combined] network error: {e}")
+        return None
+
+    if res.status_code != 200:
+        print(f"[Gemini combined] API error {res.status_code}: {res.text[:200]}")
+        return None
+
+    try:
+        data = res.json()
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        text = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", text.strip())
+        parsed = json.loads(text)
+    except (KeyError, IndexError, ValueError, TypeError) as e:
+        print(f"[Gemini combined] parse error: {e}")
+        return None
+
+    # カード識別パース
+    set_code: Optional[str] = parsed.get("set_code")
+    card_no: Optional[str] = parsed.get("card_no")
+    if isinstance(set_code, str):
+        set_code = set_code.upper().strip() or None
+    else:
+        set_code = None
+    if isinstance(card_no, str):
+        card_no = card_no.strip()
+        if card_no.isdigit():
+            card_no = card_no.zfill(3)
+        card_no = card_no or None
+    elif isinstance(card_no, int):
+        card_no = str(card_no).zfill(3)
+    else:
+        card_no = None
+
+    rarity = parsed.get("rarity")
+    if isinstance(rarity, str):
+        rarity = rarity.strip().upper() or None
+
+    card_conf = parsed.get("card_confidence")
+    try:
+        card_conf = float(card_conf) if card_conf is not None else 0.0
+    except (TypeError, ValueError):
+        card_conf = 0.0
+
+    identification = {
+        "set_code": set_code,
+        "card_no": card_no,
+        "name_ja": parsed.get("name_ja"),
+        "rarity": rarity,
+        "confidence": card_conf,
+    }
+
+    # センタリングパース
+    centering = None
+    try:
+        c = {
+            "left_pct":   float(parsed["left_pct"]),
+            "right_pct":  float(parsed["right_pct"]),
+            "top_pct":    float(parsed["top_pct"]),
+            "bottom_pct": float(parsed["bottom_pct"]),
+            "confidence": float(parsed.get("centering_confidence", 0.5)),
+        }
+        for k in ("left_pct", "right_pct", "top_pct", "bottom_pct"):
+            if not (0.5 <= c[k] <= 20.0):
+                print(f"[Gemini combined] out-of-range centering {k}={c[k]}")
+                c = None
+                break
+        centering = c
+    except (KeyError, TypeError, ValueError) as e:
+        print(f"[Gemini combined] centering parse error: {e}")
+
+    return {"identification": identification, "centering": centering}
+
+
 _CENTERING_PROMPT = """このトレーディングカード画像のセンタリング（印刷ズレ）を測定してください。
 
 カードには「ボーダー（外枠余白）」があり、その内側に「アートフレーム（印刷枠）」があります。

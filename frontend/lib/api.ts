@@ -12,6 +12,14 @@ export interface BackAnalysis {
   error?: string;
 }
 
+export interface IdentifiedCard {
+  set_code: string | null;
+  card_no: string | null;
+  name_ja: string | null;
+  rarity: string | null;
+  confidence: number;
+}
+
 export interface GradeResult {
   id: string;
   overall_grade: number;
@@ -26,6 +34,7 @@ export interface GradeResult {
   };
   overlay_images: Record<string, string>;
   back_analysis?: BackAnalysis | null;
+  identified_card?: IdentifiedCard | null;
   created_at: string;
 }
 
