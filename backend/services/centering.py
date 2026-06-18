@@ -1,15 +1,15 @@
-"""センタリング分析モジュール（v4: AXCI 方式 + 分散ベース検出）
+"""センタリング分析モジュール（v5: Hough 直線変換ベース検出）
 
 方針:
   v1: カード画像の端からの絶対距離でボーダーを測定 → 撮影角度に依存
   v2: 外枠と内枠の中心ズレで判定 → 内枠検出精度に依存
   v3: ブランドごとの既知ボーダー比率を「期待位置」として使い、
       その周辺でエッジを精密探索 → 安定性が大幅に向上
-  v4: AXCI 方式採用 — 辺中央 15% の測定点のみで走査し、
-      ピクセル分散の急増（ボーダー→絵柄の遷移）を検出。
-      色に依存しないため白・金・虹・グラデーション・左右色違い全対応。
-      サブピクセル補間（放物線フィッティング）で接戦精度向上。
-      outer_rect を外部から渡せるようにし、透視変換後の再検出をスキップ。
+  v4: 分散ベース検出 → search_min 設定が難しく L:2 R:2 などの誤検出が頻発
+  v5: Hough 直線変換を採用。
+      「辺の 35% 以上を横断する長い直線」のみを検出対象とすることで
+      絵柄の短いエッジノイズを根本的に除去する。
+      検出失敗時は期待値（ブランド設定比率）にフォールバックして安定動作。
 """
 
 import cv2
@@ -243,44 +243,39 @@ def _boundary_quality(rect: tuple, img_w: int, img_h: int) -> float:
 
 
 # ---------------------------------------------------------------------------
-# v3: 既知ボーダー比率ガイド方式（コア）
+# v5: Hough 直線変換ガイド方式（コア）
 # ---------------------------------------------------------------------------
 
 def _detect_guided_inner(image: np.ndarray, outer_rect: tuple,
                          ratios: dict) -> tuple:
     """
-    ブランドの既知ボーダー比率を「期待位置」として使い、
-    その周辺±50%の範囲でエッジを精密探索する。
+    v5: Hough 直線変換でボーダー境界を検出。
 
-    1. 期待ボーダー幅を計算（例: ワンピの左右は幅の3.8%）
-    2. その位置の周辺でCannyエッジの密度変化を探索
-    3. エッジが見つかればその位置を採用、なければ期待位置をそのまま使用
-
-    これにより:
-    - CV検出が成功 → 実際のボーダー位置を正確に取得
-    - CV検出が失敗 → 既知比率に基づく安定した結果
+    カードの設計ボーダーは「辺の 35% 以上を横断する長い直線」として現れる。
+    絵柄の短いエッジはこの条件を満たさないため自然に除去される。
+    4辺を独立して検出し、失敗した辺は期待値にフォールバック。
     """
-    ox, oy, ow, oh = outer_rect
-    roi = image[oy:oy+oh, ox:ox+ow]
+    ox, oy, ow, oh = (int(v) for v in outer_rect)
+    roi = image[oy:oy + oh, ox:ox + ow]
     rh, rw = roi.shape[:2]
 
-    # 期待ボーダー幅（ピクセル）
     expected_lr = int(rw * ratios["lr"])
     expected_top = int(rh * ratios["top"])
     expected_bottom = int(rh * ratios["bottom"])
 
-    # v4: AXCI 方式 — 分散ベース境界検出（色に依存しない）
-    left_border = _refine_border_variance(roi, "left", expected_lr, rw, rh)
-    right_border = _refine_border_variance(roi, "right", expected_lr, rw, rh)
-    top_border = _refine_border_variance(roi, "top", expected_top, rw, rh)
-    bottom_border = _refine_border_variance(roi, "bottom", expected_bottom, rw, rh)
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi.copy()
+    edges = cv2.Canny(gray, 30, 100)
+
+    left_border = _find_border_hough(edges, "left", expected_lr, rw, rh)
+    right_border = _find_border_hough(edges, "right", expected_lr, rw, rh)
+    top_border = _find_border_hough(edges, "top", expected_top, rw, rh)
+    bottom_border = _find_border_hough(edges, "bottom", expected_bottom, rw, rh)
 
     ix = ox + left_border
     iy = oy + top_border
     iw = ow - left_border - right_border
     ih = oh - top_border - bottom_border
 
-    # サニティチェック
     if iw < ow * 0.5 or ih < oh * 0.5:
         return (ox + expected_lr, oy + expected_top,
                 float(ow - 2 * expected_lr), float(oh - expected_top - expected_bottom))
@@ -288,89 +283,91 @@ def _detect_guided_inner(image: np.ndarray, outer_rect: tuple,
     return (ix, iy, iw, ih)
 
 
-def _refine_border_variance(roi: np.ndarray, direction: str,
-                             expected: int, w: int, h: int) -> float:
+def _find_border_hough(edges: np.ndarray, direction: str,
+                       expected: int, w: int, h: int) -> float:
     """
-    v4 AXCI 方式: 3点サンプリング + 分散ベースのボーダー幅精密検出。
+    Hough 直線変換でボーダー境界線の位置を検出する。
 
-    辺に沿って3か所（35-45%、45-55%、55-65%）でそれぞれ独立に測定し、
-    メディアンを返す。撮影角度のわずかなズレや絵柄ノイズが1点に
-    偏っても他2点が補正するため、再現性が大幅に向上する。
+    期待位置 ±70% の探索範囲内で、辺の 35% 以上を横断する直線を探す。
+    複数候補がある場合は外縁に最も近い線（最小ボーダー幅）を採用。
+    適格な直線が見つからない場合は expected を返す（安定フォールバック）。
 
-    各測定点では: ボーダー（均一）→ 絵柄（高分散）の遷移を
-    「最初の有意なスパイク」として検出。色に依存しない。
+    Args:
+        edges: Canny エッジ画像（ROI 内座標）
+        direction: "top" | "bottom" | "left" | "right"
+        expected: 期待ボーダー幅（ピクセル）
+        w, h: ROI の幅・高さ
     """
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi.copy()
-
-    # 3つの測定ウィンドウ（辺に沿って均等配置、各10%幅）
-    if direction in ("left", "right"):
-        windows = [
-            (int(h * 0.35), int(h * 0.45)),
-            (int(h * 0.45), int(h * 0.55)),
-            (int(h * 0.55), int(h * 0.65)),
-        ]
-    else:
-        windows = [
-            (int(w * 0.35), int(w * 0.45)),
-            (int(w * 0.45), int(w * 0.55)),
-            (int(w * 0.55), int(w * 0.65)),
-        ]
-
-    # 探索範囲: 期待値の 15% ~ 200%（開始位置を近づけて取りこぼし防止）
-    search_min = max(2, int(expected * 0.15))
-    search_max = min(int(expected * 2.0), int(min(w, h) * 0.22))
+    search_min = max(2, int(expected * 0.30))
+    search_max = min(int(expected * 1.70), int(min(w, h) * 0.25))
     if search_max <= search_min:
         return float(expected)
 
-    positions = list(range(search_min, search_max + 1))
-    estimates: list[float] = []
+    is_horizontal = direction in ("top", "bottom")
+    perp = w if is_horizontal else h          # ボーダー線が走る方向の長さ
+    min_length = int(perp * 0.35)             # 辺の 35% 以上の線を対象
+    max_gap = int(perp * 0.12)                # 12% のギャップまで繋ぐ
+    angle_tol = max(3, int(perp * 0.015))     # 1.5% 以内の角度ずれを許容
 
-    for start, end in windows:
-        variances: list[float] = []
-        for pos in positions:
-            if direction == "left":
-                strip = gray[start:end, pos].astype(float)
-            elif direction == "right":
-                strip = gray[start:end, w - 1 - pos].astype(float)
-            elif direction == "top":
-                strip = gray[pos, start:end].astype(float)
-            else:  # bottom
-                strip = gray[h - 1 - pos, start:end].astype(float)
-            variances.append(float(np.var(strip)) if len(strip) > 0 else 0.0)
+    # 探索領域を切り出し（絶対座標オフセットを記録）
+    if direction == "top":
+        region = edges[search_min:search_max + 1, :]
+        region_offset = search_min
+    elif direction == "bottom":
+        start_row = max(0, h - search_max - 1)
+        region = edges[start_row:h - search_min, :]
+        region_offset = start_row
+    elif direction == "left":
+        region = edges[:, search_min:search_max + 1]
+        region_offset = search_min
+    else:  # right
+        start_col = max(0, w - search_max - 1)
+        region = edges[:, start_col:w - search_min]
+        region_offset = start_col
 
-        if not variances:
-            continue
-        var_arr = np.array(variances, dtype=float)
-        if np.max(var_arr) < 20.0:
-            continue
-
-        smoothed = np.convolve(var_arr, np.ones(3) / 3.0, mode="same")
-        gradient = np.diff(smoothed)
-        if len(gradient) == 0:
-            continue
-
-        # 白ボーダー→デザイン枠の小さな最初のスパイクを捉える
-        threshold = max(np.max(gradient) * 0.25, 3.0)
-        first_candidates = np.where(gradient > threshold)[0]
-        peak_idx = int(first_candidates[0]) if len(first_candidates) > 0 else int(np.argmax(gradient))
-
-        # サブピクセル補間（放物線フィッティング）
-        if 0 < peak_idx < len(gradient) - 1:
-            g1, g2, g3 = gradient[peak_idx - 1], gradient[peak_idx], gradient[peak_idx + 1]
-            denom = g1 - 2.0 * g2 + g3
-            dx = 0.5 * (g1 - g3) / denom if abs(denom) > 1e-6 else 0.0
-            result = float(positions[peak_idx]) + max(-1.0, min(1.0, dx))
-        else:
-            result = float(positions[peak_idx])
-
-        if abs(result - expected) <= expected:
-            estimates.append(result)
-
-    if not estimates:
+    if region.size == 0:
         return float(expected)
 
-    # 3点のメディアン: 外れ値1点に引っ張られない
-    return float(np.median(estimates))
+    lines = cv2.HoughLinesP(
+        region,
+        rho=1,
+        theta=np.pi / 180,
+        threshold=max(8, min_length // 4),
+        minLineLength=min_length,
+        maxLineGap=max_gap,
+    )
+
+    if lines is None:
+        return float(expected)
+
+    best: float | None = None
+
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+
+        if is_horizontal:
+            if abs(y1 - y2) > angle_tol:
+                continue  # 水平でない
+            abs_y = (y1 + y2) / 2.0 + region_offset
+            border_dist = abs_y if direction == "top" else h - abs_y
+        else:
+            if abs(x1 - x2) > angle_tol:
+                continue  # 垂直でない
+            abs_x = (x1 + x2) / 2.0 + region_offset
+            border_dist = abs_x if direction == "left" else w - abs_x
+
+        # 外縁に最も近い線を採用（最小ボーダー幅）
+        if best is None or border_dist < best:
+            best = border_dist
+
+    if best is None:
+        return float(expected)
+
+    # サニティチェック: 期待値の 3 倍以上ずれたら expected を返す
+    if abs(best - expected) > expected * 2.0:
+        return float(expected)
+
+    return float(best)
 
 
 # ---------------------------------------------------------------------------
