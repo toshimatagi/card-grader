@@ -42,6 +42,46 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/debug/gemini")
+async def debug_gemini():
+    """Gemini API キーの設定状況と疎通を確認するデバッグエンドポイント。"""
+    from .services.gemini_identify import GEMINI_API_KEY, GEMINI_MODEL, GEMINI_URL
+    import httpx
+
+    key_set = bool(GEMINI_API_KEY)
+    key_preview = (GEMINI_API_KEY[:6] + "...") if key_set else "(未設定)"
+
+    if not key_set:
+        return {
+            "key_set": False,
+            "key_preview": key_preview,
+            "model": GEMINI_MODEL,
+            "ping": "skipped",
+        }
+
+    # 最小リクエストで疎通確認
+    payload = {
+        "contents": [{"parts": [{"text": "respond with just: ok"}]}],
+        "generationConfig": {"maxOutputTokens": 5},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.post(f"{GEMINI_URL}?key={GEMINI_API_KEY}", json=payload)
+        ping_status = res.status_code
+        ping_ok = res.status_code == 200
+    except Exception as e:
+        ping_status = str(e)
+        ping_ok = False
+
+    return {
+        "key_set": True,
+        "key_preview": key_preview,
+        "model": GEMINI_MODEL,
+        "ping_status": ping_status,
+        "ping_ok": ping_ok,
+    }
+
+
 # =============================================================================
 # Cron endpoints — 外部 (GitHub Actions など) から POST で叩いて走らせる。
 # Render IP からの呼び出しなので yuyutei 等 GH Actions IP がブロックされてる

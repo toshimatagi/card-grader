@@ -436,9 +436,13 @@ def _build_manual_centering_result(manual: dict, card_image: np.ndarray) -> dict
 
 def _analyze_centering_with_ai(card_image, centering_mode, border_ratios, cw, ch):
     """Gemini AI でセンタリング測定、失敗時は OpenCV にフォールバック。"""
+    from .gemini_identify import GEMINI_API_KEY
+    print(f"[centering] Gemini_API_Key set={bool(GEMINI_API_KEY)}")
+
     # JPEG に変換して Gemini へ送信
     _, buf = cv2.imencode(".jpg", card_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
     ai = analyze_centering_ai(buf.tobytes())
+    print(f"[centering] Gemini result={ai}")
 
     if ai and ai["confidence"] >= 0.5:
         left   = int(cw * ai["left_pct"]   / 100)
