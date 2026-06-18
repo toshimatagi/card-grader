@@ -428,20 +428,105 @@ def _find_edge_from_side(gray: np.ndarray, direction: str, max_depth: int) -> in
 # ---------------------------------------------------------------------------
 
 def _fallback_full_image(image: np.ndarray) -> dict:
-    """輪郭が見つからない場合のフォールバック"""
+    """輪郭が見つからない場合のフォールバック。
+    カードが画面全体を占拠している状況を想定し、
+    Hough 直線変換でカード外縁を精密に絞り込む。
+    """
     h, w = image.shape[:2]
-    margin = int(min(h, w) * 0.02)
-    card_image = image[margin:h - margin, margin:w - margin]
-    card_image = _trim_margins(card_image)  # トリミングも適用
+
+    # Hough で外縁を検出して余白を削る
+    crop = _hough_crop_fullframe(image)
+    if crop is not None:
+        x, y, cw, ch = crop
+        card_image = image[y:y + ch, x:x + cw]
+    else:
+        margin = int(min(h, w) * 0.02)
+        card_image = image[margin:h - margin, margin:w - margin]
+
+    card_image = _trim_margins(card_image)
     aspect_ratio = card_image.shape[1] / card_image.shape[0]
     return {
         "card_image": card_image,
         "contour": None,
-        "corners": np.array([[margin, margin], [w - margin, margin],
-                             [w - margin, h - margin], [margin, h - margin]], dtype="float32"),
+        "corners": np.array([[0, 0], [w - 1, 0],
+                             [w - 1, h - 1], [0, h - 1]], dtype="float32"),
         "card_type": _estimate_card_type(aspect_ratio),
         "original_size": (h, w),
     }
+
+
+def _hough_crop_fullframe(image: np.ndarray) -> tuple | None:
+    """カードが全画面を占拠している画像で、Hough 直線変換を使って
+    画像端に残存する背景余白を検出し、クロップ範囲 (x, y, w, h) を返す。
+    検出できなければ None を返す。
+
+    アプローチ:
+      - 画像の外側 15% のストリップ領域だけを見る
+      - 辺と平行な長い直線 (辺の長さの 60% 以上) を探す
+      - 最も外側の適格な線を「カードの外縁」とする
+    """
+    h, w = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 30, 100)
+
+    scan = int(min(h, w) * 0.15)  # 外側 15% だけ走査
+    crops = {"top": 0, "bottom": h, "left": 0, "right": w}
+
+    def _find_outer_line(strip: np.ndarray, direction: str,
+                         offset: int, perp_len: int) -> int | None:
+        """ストリップ内で辺と平行な長い直線を探し、最も外側の位置を返す。"""
+        min_len = int(perp_len * 0.60)
+        lines = cv2.HoughLinesP(
+            strip, rho=1, theta=np.pi / 180,
+            threshold=max(8, min_len // 4),
+            minLineLength=min_len,
+            maxLineGap=int(perp_len * 0.10),
+        )
+        if lines is None:
+            return None
+        tol = max(5, int(perp_len * 0.02))
+        best = None
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            if direction in ("top", "bottom"):
+                if abs(y1 - y2) > tol:
+                    continue
+                pos = int((y1 + y2) / 2) + offset
+                dist = pos if direction == "top" else h - pos
+            else:
+                if abs(x1 - x2) > tol:
+                    continue
+                pos = int((x1 + x2) / 2) + offset
+                dist = pos if direction == "left" else w - pos
+            if best is None or dist < best[0]:
+                best = (dist, pos)
+        return best[1] if best else None
+
+    # 各辺の外側ストリップで走査
+    pos = _find_outer_line(edges[:scan, :], "top", 0, w)
+    if pos is not None and pos > 3:
+        crops["top"] = pos
+
+    pos = _find_outer_line(edges[h - scan:, :], "bottom", h - scan, w)
+    if pos is not None and pos < h - 3:
+        crops["bottom"] = pos
+
+    pos = _find_outer_line(edges[:, :scan], "left", 0, h)
+    if pos is not None and pos > 3:
+        crops["left"] = pos
+
+    pos = _find_outer_line(edges[:, w - scan:], "right", w - scan, h)
+    if pos is not None and pos < w - 3:
+        crops["right"] = pos
+
+    x, y = crops["left"], crops["top"]
+    cw, ch = crops["right"] - x, crops["bottom"] - y
+
+    # 過剰クロップ防止 (元サイズの 70% 以上を保持)
+    if cw < w * 0.70 or ch < h * 0.70:
+        return None
+
+    return (x, y, cw, ch)
 
 
 def _estimate_card_type(aspect_ratio: float) -> str:

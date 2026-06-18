@@ -46,10 +46,9 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     """
     options = options or {"detailed_report": True, "overlay_images": True}
 
-    # バイトデータからOpenCV画像に変換
+    # バイトデータからOpenCV画像に変換 (cv2 は EXIF 向きを自動適用)
     nparr = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
     if image is None:
         raise ValueError("画像のデコードに失敗しました")
 
@@ -98,6 +97,17 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
         # 自動検出 → 従来通り auto-warp & trim
         card_data = detect_card(image, trim=True)
         card_image = card_data["card_image"]
+
+        # 検出結果が landscape (W > H) → カードを横向きに撮影した場合。
+        # 標準 TCG カードは portrait (H > W) なので 90° 回転して再試行。
+        ch, cw = card_image.shape[:2]
+        if cw > ch:
+            rotated = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+            retry = detect_card(rotated, trim=True)
+            rh, rw = retry["card_image"].shape[:2]
+            if rh > rw:  # portrait に戻った
+                card_data = retry
+                card_image = retry["card_image"]
 
     # カード画像も処理用にリサイズ（長辺800px上限）
     card_image = _resize_if_needed(card_image, max_side=800)

@@ -2,7 +2,7 @@
 
 Content-Type ヘッダだけでなく実ファイルのマジックバイトを検証し、
 許容形式・サイズ・縦横ピクセル上限まで一括チェックする。
-EXIF 含むメタデータは imdecode→imencode で副作用的に剥がれる。
+EXIF 向き情報は cv2 が自動適用するため追加処理は不要。
 """
 
 from __future__ import annotations
