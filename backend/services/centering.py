@@ -342,8 +342,18 @@ def _refine_border_variance(roi: np.ndarray, direction: str,
     if len(gradient) == 0:
         return float(expected)
 
-    # グラジエント最大点 = ボーダー→絵柄の遷移が最も急な点
-    peak_idx = int(np.argmax(gradient))
+    # 「最初の有意なスパイク」を使う（最大グラジエントではない）。
+    # 白ボーダー→デザイン枠の遷移は小さく先に現れ、
+    # デザイン枠→絵柄内部の遷移は大きく後に現れる。
+    # argmax だと後者に引っ張られるため、閾値超えの最初の点を採用。
+    threshold = max(np.max(gradient) * 0.25, 3.0)
+    first_candidates = np.where(gradient > threshold)[0]
+
+    if len(first_candidates) == 0:
+        # 有意なスパイクなし → 最大グラジエントにフォールバック
+        peak_idx = int(np.argmax(gradient))
+    else:
+        peak_idx = int(first_candidates[0])
 
     # サブピクセル補間（放物線フィッティング）
     if 0 < peak_idx < len(gradient) - 1:
