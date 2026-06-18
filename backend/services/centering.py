@@ -291,85 +291,86 @@ def _detect_guided_inner(image: np.ndarray, outer_rect: tuple,
 def _refine_border_variance(roi: np.ndarray, direction: str,
                              expected: int, w: int, h: int) -> float:
     """
-    v4 AXCI 方式: 中央点測定 + 局所分散ベースのボーダー幅精密検出。
+    v4 AXCI 方式: 3点サンプリング + 分散ベースのボーダー幅精密検出。
 
-    カードの均一なボーダー → 複雑な絵柄への遷移を、
-    辺中央 15% の測定点でのピクセル分散急増として検出する。
-    色に依存しないため白・金・虹・グラデーション・左右色違い全対応。
-    放物線フィッティングによるサブピクセル補間で接戦精度も向上。
+    辺に沿って3か所（35-45%、45-55%、55-65%）でそれぞれ独立に測定し、
+    メディアンを返す。撮影角度のわずかなズレや絵柄ノイズが1点に
+    偏っても他2点が補正するため、再現性が大幅に向上する。
+
+    各測定点では: ボーダー（均一）→ 絵柄（高分散）の遷移を
+    「最初の有意なスパイク」として検出。色に依存しない。
     """
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi.copy()
 
-    # 測定ウィンドウ: 辺の中央 15% のみ（AXCI 方式: 絵柄に邪魔されない帯域）
+    # 3つの測定ウィンドウ（辺に沿って均等配置、各10%幅）
     if direction in ("left", "right"):
-        y_start, y_end = int(h * 0.425), int(h * 0.575)
+        windows = [
+            (int(h * 0.35), int(h * 0.45)),
+            (int(h * 0.45), int(h * 0.55)),
+            (int(h * 0.55), int(h * 0.65)),
+        ]
     else:
-        x_start, x_end = int(w * 0.425), int(w * 0.575)
+        windows = [
+            (int(w * 0.35), int(w * 0.45)),
+            (int(w * 0.45), int(w * 0.55)),
+            (int(w * 0.55), int(w * 0.65)),
+        ]
 
-    # 探索範囲: 期待値の 30% ~ 200% に拡張
-    search_min = max(2, int(expected * 0.30))
+    # 探索範囲: 期待値の 15% ~ 200%（開始位置を近づけて取りこぼし防止）
+    search_min = max(2, int(expected * 0.15))
     search_max = min(int(expected * 2.0), int(min(w, h) * 0.22))
     if search_max <= search_min:
         return float(expected)
 
     positions = list(range(search_min, search_max + 1))
-    variances: list[float] = []
+    estimates: list[float] = []
 
-    for pos in positions:
-        if direction == "left":
-            strip = gray[y_start:y_end, pos].astype(float)
-        elif direction == "right":
-            strip = gray[y_start:y_end, w - 1 - pos].astype(float)
-        elif direction == "top":
-            strip = gray[pos, x_start:x_end].astype(float)
-        else:  # bottom
-            strip = gray[h - 1 - pos, x_start:x_end].astype(float)
-        variances.append(float(np.var(strip)) if len(strip) > 0 else 0.0)
+    for start, end in windows:
+        variances: list[float] = []
+        for pos in positions:
+            if direction == "left":
+                strip = gray[start:end, pos].astype(float)
+            elif direction == "right":
+                strip = gray[start:end, w - 1 - pos].astype(float)
+            elif direction == "top":
+                strip = gray[pos, start:end].astype(float)
+            else:  # bottom
+                strip = gray[h - 1 - pos, start:end].astype(float)
+            variances.append(float(np.var(strip)) if len(strip) > 0 else 0.0)
 
-    if not variances:
+        if not variances:
+            continue
+        var_arr = np.array(variances, dtype=float)
+        if np.max(var_arr) < 20.0:
+            continue
+
+        smoothed = np.convolve(var_arr, np.ones(3) / 3.0, mode="same")
+        gradient = np.diff(smoothed)
+        if len(gradient) == 0:
+            continue
+
+        # 白ボーダー→デザイン枠の小さな最初のスパイクを捉える
+        threshold = max(np.max(gradient) * 0.25, 3.0)
+        first_candidates = np.where(gradient > threshold)[0]
+        peak_idx = int(first_candidates[0]) if len(first_candidates) > 0 else int(np.argmax(gradient))
+
+        # サブピクセル補間（放物線フィッティング）
+        if 0 < peak_idx < len(gradient) - 1:
+            g1, g2, g3 = gradient[peak_idx - 1], gradient[peak_idx], gradient[peak_idx + 1]
+            denom = g1 - 2.0 * g2 + g3
+            dx = 0.5 * (g1 - g3) / denom if abs(denom) > 1e-6 else 0.0
+            result = float(positions[peak_idx]) + max(-1.0, min(1.0, dx))
+        else:
+            result = float(positions[peak_idx])
+
+        if abs(result - expected) <= expected:
+            estimates.append(result)
+
+    if not estimates:
         return float(expected)
 
-    var_arr = np.array(variances, dtype=float)
-
-    # 全体が均一（分散小）→ ボーダー/絵柄の区別困難 → expected を返す
-    if np.max(var_arr) < 20.0:
-        return float(expected)
-
-    # 移動平均で平滑化 → 差分（グラジエント）を計算
-    smoothed = np.convolve(var_arr, np.ones(3) / 3.0, mode="same")
-    gradient = np.diff(smoothed)
-
-    if len(gradient) == 0:
-        return float(expected)
-
-    # 「最初の有意なスパイク」を使う（最大グラジエントではない）。
-    # 白ボーダー→デザイン枠の遷移は小さく先に現れ、
-    # デザイン枠→絵柄内部の遷移は大きく後に現れる。
-    # argmax だと後者に引っ張られるため、閾値超えの最初の点を採用。
-    threshold = max(np.max(gradient) * 0.25, 3.0)
-    first_candidates = np.where(gradient > threshold)[0]
-
-    if len(first_candidates) == 0:
-        # 有意なスパイクなし → 最大グラジエントにフォールバック
-        peak_idx = int(np.argmax(gradient))
-    else:
-        peak_idx = int(first_candidates[0])
-
-    # サブピクセル補間（放物線フィッティング）
-    if 0 < peak_idx < len(gradient) - 1:
-        g1, g2, g3 = gradient[peak_idx - 1], gradient[peak_idx], gradient[peak_idx + 1]
-        denom = g1 - 2.0 * g2 + g3
-        dx = 0.5 * (g1 - g3) / denom if abs(denom) > 1e-6 else 0.0
-        dx = max(-1.0, min(1.0, dx))
-        result = float(positions[peak_idx]) + dx
-    else:
-        result = float(positions[peak_idx])
-
-    # サニティチェック: 期待値から大きく外れたら expected を返す
-    if abs(result - expected) > expected:
-        return float(expected)
-
-    return result
+    # 3点のメディアン: 外れ値1点に引っ張られない
+    return float(np.median(estimates))
 
 
 # ---------------------------------------------------------------------------
