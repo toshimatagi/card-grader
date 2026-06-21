@@ -551,10 +551,17 @@ export async function getCardByCode(code: string): Promise<CardByCodeResult> {
 
   const ids = cards.map((c) => c.id).join(",");
   const snapSelect = "card_id,source,captured_at,price_type,price,stock_status";
-  const snapshots = await sbGet<PriceSnapshot[]>(
-    "price_snapshots",
-    `card_id=in.(${ids})&select=${snapSelect}&order=captured_at.asc&limit=10000`
-  );
+  const since90 = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+
+  // price_snapshots と grade_prices を並列取得
+  const [snapshots, gradePrices] = await Promise.all([
+    sbGet<PriceSnapshot[]>(
+      "price_snapshots",
+      `card_id=in.(${ids})&captured_at=gte.${since90}&select=${snapSelect}&order=captured_at.asc&limit=3000`,
+      300,
+    ),
+    listGradePrices(ids.split(",")).catch(() => [] as CardGradePrice[]),
+  ]);
 
   const PRICE_FLOOR = 10;
   const validSnapshots = snapshots.filter(
@@ -585,14 +592,6 @@ export async function getCardByCode(code: string): Promise<CardByCodeResult> {
       ],
     };
   });
-
-  const cardIds = cards.map((c) => c.id);
-  let gradePrices: CardGradePrice[] = [];
-  try {
-    gradePrices = await listGradePrices(cardIds);
-  } catch {
-    // grade prices unavailable — show Raw-only UI
-  }
 
   return { code: `${setCode}-${cardNo}`, cards: resultCards, gradePrices };
 }
