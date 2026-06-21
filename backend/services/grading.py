@@ -13,7 +13,7 @@ from .surface import analyze_surface
 from .color import analyze_color
 from .edges import analyze_edges
 from .card_brands import get_brand, get_centering_mode, get_border_ratios
-from .gemini_identify import analyze_centering_ai, analyze_card_and_centering_ai
+from .gemini_identify import analyze_centering_ai
 
 
 # 各分析の重み
@@ -125,7 +125,6 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     border_ratios = get_border_ratios(brand) if brand else None
 
     # 2. 各分析を実行
-    identified_card = None
     if manual_centering and "lr_ratio" in manual_centering:
         centering_result = _build_manual_centering_result(manual_centering, card_image)
         # フルアート系のランドマーク補正 (任意)
@@ -158,7 +157,7 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
                 centering_result["detail"]["design_alignment"] = design_detail
     else:
         ch, cw = card_image.shape[:2]
-        centering_result, identified_card = _analyze_centering_with_ai(
+        centering_result = _analyze_centering_with_ai(
             card_image, centering_mode, border_ratios, cw, ch
         )
     # color を先に走らせて is_holo を取得し、surface/edges に渡してホロ用に閾値を緩める
@@ -248,7 +247,6 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
         },
         "overlay_images": overlay_images,
         "back_analysis": back_analysis,
-        "identified_card": identified_card,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -437,23 +435,13 @@ def _build_manual_centering_result(manual: dict, card_image: np.ndarray) -> dict
 
 
 def _analyze_centering_with_ai(card_image, centering_mode, border_ratios, cw, ch):
-    """Gemini AI でカード識別+センタリングを1回のリクエストで実行。
-    センタリング失敗時は OpenCV にフォールバック。
-
-    Returns: (centering_result, identified_card_or_None)
-    """
+    """Gemini AI でセンタリング測定、失敗時は OpenCV にフォールバック。"""
     from .gemini_identify import GEMINI_API_KEY
     print(f"[centering] Gemini_API_Key set={bool(GEMINI_API_KEY)}")
 
     _, buf = cv2.imencode(".jpg", card_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    combined = analyze_card_and_centering_ai(buf.tobytes())
-    print(f"[centering] Gemini combined result={combined}")
-
-    identified_card = None
-    ai = None
-    if combined:
-        identified_card = combined.get("identification")
-        ai = combined.get("centering")
+    ai = analyze_centering_ai(buf.tobytes())
+    print(f"[centering] Gemini result={ai}")
 
     if ai and ai["confidence"] >= 0.5:
         left   = int(cw * ai["left_pct"]   / 100)
@@ -475,7 +463,7 @@ def _analyze_centering_with_ai(card_image, centering_mode, border_ratios, cw, ch
                    "top": float(top), "bottom": float(bottom)}
         overlay = _generate_overlay(card_image, outer_rect, inner_rect, borders)
 
-        centering_result = {
+        return {
             "score": score,
             "detail": {
                 "lr_ratio": f"{lr_larger}/{100 - lr_larger}",
@@ -488,14 +476,12 @@ def _analyze_centering_with_ai(card_image, centering_mode, border_ratios, cw, ch
             },
             "overlay": overlay,
         }
-        return centering_result, identified_card
 
     # フォールバック: OpenCV
-    centering_result = analyze_centering(
+    return analyze_centering(
         card_image, mode=centering_mode, border_ratios=border_ratios,
         outer_rect=(0, 0, cw, ch),
     )
-    return centering_result, identified_card
 
 
 def _round_grade(score: float) -> float:
