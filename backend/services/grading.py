@@ -13,7 +13,6 @@ from .surface import analyze_surface
 from .color import analyze_color
 from .edges import analyze_edges
 from .card_brands import get_brand, get_centering_mode, get_border_ratios
-from .gemini_identify import analyze_centering_ai, analyze_centering_ai_bbox
 
 
 # 各分析の重み
