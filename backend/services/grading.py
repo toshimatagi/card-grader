@@ -13,7 +13,7 @@ from .surface import analyze_surface
 from .color import analyze_color
 from .edges import analyze_edges
 from .card_brands import get_brand, get_centering_mode, get_border_ratios
-from .gemini_identify import analyze_centering_ai
+from .gemini_identify import analyze_centering_ai, analyze_centering_ai_bbox
 
 
 # 各分析の重み
@@ -158,7 +158,7 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     else:
         ch, cw = card_image.shape[:2]
         centering_result = _analyze_centering_with_ai(
-            card_image, centering_mode, border_ratios, cw, ch
+            card_image, centering_mode, border_ratios, cw, ch, brand=brand
         )
     # color を先に走らせて is_holo を取得し、surface/edges に渡してホロ用に閾値を緩める
     color_result = analyze_color(card_image)
@@ -434,31 +434,41 @@ def _build_manual_centering_result(manual: dict, card_image: np.ndarray) -> dict
     }
 
 
-def _analyze_centering_with_ai(card_image, centering_mode, border_ratios, cw, ch):
-    """Gemini AI でセンタリング測定、失敗時は OpenCV にフォールバック。"""
-    from .gemini_identify import GEMINI_API_KEY
-    print(f"[centering] Gemini_API_Key set={bool(GEMINI_API_KEY)}")
+def _analyze_centering_with_ai(card_image, centering_mode, border_ratios, cw, ch, brand: str = ""):
+    """Gemini AI でセンタリング測定、失敗時は OpenCV にフォールバック。
+
+    2-callチェーン（観察→定量化）により対称出力を防ぎ、ホロ・フルアートカードにも対応。
+    """
+    from .gemini_identify import GEMINI_API_KEY, analyze_centering_ai_2call
+    print(f"[centering] Gemini_API_Key set={bool(GEMINI_API_KEY)} brand={brand!r}")
 
     _, buf = cv2.imencode(".jpg", card_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    ai = analyze_centering_ai(buf.tobytes())
-    print(f"[centering] Gemini result={ai}")
+    img_bytes = buf.tobytes()
+
+    ai = analyze_centering_ai_2call(img_bytes)
+    print(f"[centering] Gemini 2call result={ai}")
 
     if ai and ai["confidence"] >= 0.5:
-        left   = int(cw * ai["left_pct"]   / 100)
-        right  = int(cw * ai["right_pct"]  / 100)
-        top    = int(ch * ai["top_pct"]    / 100)
-        bottom = int(ch * ai["bottom_pct"] / 100)
+        from .centering import _calculate_score, _generate_overlay, _detect_outer_boundary
+
+        # カードの実際の境界を検出（黄色枠）
+        outer_rect = _detect_outer_boundary(card_image)
+        ox, oy, ow, oh = outer_rect
+
+        # AIの%をカード寸法に掛けてpx換算（緑枠）
+        left   = int(ow * ai["left_pct"]   / 100)
+        right  = int(ow * ai["right_pct"]  / 100)
+        top    = int(oh * ai["top_pct"]    / 100)
+        bottom = int(oh * ai["bottom_pct"] / 100)
 
         lr_total = left + right or 1
         tb_total = top  + bottom or 1
         lr_larger = round(max(left, right) / lr_total * 100)
         tb_larger = round(max(top,  bottom) / tb_total * 100)
 
-        from .centering import _calculate_score, _generate_overlay
         score = _calculate_score(max(lr_larger, tb_larger))
 
-        inner_rect = (left, top, cw - left - right, ch - top - bottom)
-        outer_rect = (0, 0, cw, ch)
+        inner_rect = (ox + left, oy + top, ow - left - right, oh - top - bottom)
         borders = {"left": float(left), "right": float(right),
                    "top": float(top), "bottom": float(bottom)}
         overlay = _generate_overlay(card_image, outer_rect, inner_rect, borders)
@@ -472,7 +482,7 @@ def _analyze_centering_with_ai(card_image, centering_mode, border_ratios, cw, ch
                 "right_border":  right,
                 "top_border":    top,
                 "bottom_border": bottom,
-                "mode": "gemini_ai",
+                "mode": "gemini_ai_2call",
             },
             "overlay": overlay,
         }
