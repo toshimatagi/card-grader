@@ -25,7 +25,7 @@ def analyze_centering(card_image: np.ndarray, mode: str = "bordered",
 
     Args:
         card_image: 前処理済みカード画像
-        mode: "bordered" | "borderless" | "gold_border" | "thin_border"
+        mode: "bordered" | "borderless" | "gold_border" | "thin_border" | "color_border"
         border_ratios: ブランド既知ボーダー比率
             {"lr": 0.045, "top": 0.035, "bottom": 0.065}
         outer_rect: カード外枠 (x, y, w, h)。指定時は外枠再検出をスキップ。
@@ -39,6 +39,9 @@ def analyze_centering(card_image: np.ndarray, mode: str = "bordered",
 
     if mode == "borderless":
         inner_rect = _detect_borderless_inner(card_image, outer_rect)
+    elif mode == "color_border":
+        # 色付きボーダー専用: カード端の色を基準にして境界を検出
+        inner_rect = _detect_color_border_inner(card_image, outer_rect, border_ratios)
     elif border_ratios:
         # v3: 既知比率ガイド方式（bordered / gold_border / thin_border 共通）
         inner_rect = _detect_guided_inner(card_image, outer_rect, border_ratios)
@@ -359,6 +362,158 @@ def _ratio_fallback(ox: int, oy: int, ow: int, oh: int, ratios: dict) -> tuple:
     top = int(oh * ratios.get("top",    0.035))
     bot = int(oh * ratios.get("bottom", 0.065))
     return (ox + lr, oy + top, ow - 2 * lr, oh - top - bot)
+
+
+# ---------------------------------------------------------------------------
+# 色付きボーダー専用の検出 (ONE PIECEカードなど)
+# ---------------------------------------------------------------------------
+
+def _detect_color_border_inner(image: np.ndarray, outer_rect: tuple,
+                                border_ratios: dict | None = None,
+                                sample_from: int = 3) -> tuple:
+    """
+    カード端の色を基準にして色付きボーダーの内側境界を検出する。
+
+    アプローチ: 各辺の端から数ピクセルの「ボーダー色」を取得し、
+    内側に向かってその色と大きく異なる点をボーダー終端とする。
+
+    白ボーダー走査が機能しないONE PIECEなどの色付きボーダーカード向け。
+    """
+    ox, oy, ow, oh = (int(v) for v in outer_rect)
+    roi = image[oy:oy + oh, ox:ox + ow]
+    h, w = roi.shape[:2]
+
+    if h < 40 or w < 40:
+        fallback = border_ratios or {"lr": 0.04, "top": 0.03, "bottom": 0.055}
+        return _ratio_fallback(ox, oy, ow, oh, fallback)
+
+    # 最大探索幅 (カードの15%まで)
+    max_search = int(min(h, w) * 0.15)
+    # sample_from=0（透視変換済み）なら1px境界まで検出; 生写真は最低5px
+    min_search = max(1, sample_from) if sample_from == 0 else max(2, int(min(h, w) * 0.01))
+
+    borders: dict[str, int] = {}
+
+    for side in ("left", "right", "top", "bottom"):
+        depth = _scan_color_border(roi, side, w, h, max_search, min_search,
+                                   sample_from=sample_from)
+        borders[side] = depth
+
+    left, right, top, bottom = (
+        borders["left"], borders["right"],
+        borders["top"], borders["bottom"],
+    )
+
+    # サニティチェック: 合計ボーダーがROIの40%超なら比率フォールバック
+    if (left + right) > w * 0.40 or (top + bottom) > h * 0.40:
+        print(f"[color_border] border too large L={left} R={right} T={top} B={bottom}, ratio fallback")
+        fallback = border_ratios or {"lr": 0.04, "top": 0.03, "bottom": 0.055}
+        return _ratio_fallback(ox, oy, ow, oh, fallback)
+
+    iw = w - left - right
+    ih = h - top - bottom
+    print(f"[color_border] L={left} R={right} T={top} B={bottom} iw={iw} ih={ih}")
+    return (ox + left, oy + top, iw, ih)
+
+
+def _scan_color_border(roi: np.ndarray, direction: str,
+                       w: int, h: int,
+                       max_search: int, min_search: int,
+                       sample_from: int = 3) -> int:
+    """
+    1辺のカラーボーダー幅を検出する。
+
+    カード端の色を「ボーダー色」として取得し、内側に走査して
+    「ボーダー色から大きく外れる点」をボーダー終端とする。
+
+    端から min_search〜max_search の範囲で探索し、
+    見つからなければ min_search を返す（非常に薄いボーダー扱い）。
+
+    sample_from: サンプル開始位置 (px)。透視変換済み画像では0、
+                 生写真では3（カメラ端の影を避けるため）。
+    """
+    SAMPLE_FROM = sample_from
+    SAMPLE_TO = SAMPLE_FROM + 3  # 3px幅のみサンプリングして境界外混入を防ぐ
+    if direction == "left":
+        sample_strip = roi[h // 4: 3 * h // 4, SAMPLE_FROM:SAMPLE_TO]
+    elif direction == "right":
+        sample_strip = roi[h // 4: 3 * h // 4, w - SAMPLE_TO: w - SAMPLE_FROM]
+    elif direction == "top":
+        sample_strip = roi[SAMPLE_FROM:SAMPLE_TO, w // 4: 3 * w // 4]
+    else:  # bottom
+        sample_strip = roi[h - SAMPLE_TO: h - SAMPLE_FROM, w // 4: 3 * w // 4]
+
+    if sample_strip.size == 0:
+        return min_search
+
+    # LAB色空間でボーダー色の代表値を取得
+    lab_strip = cv2.cvtColor(sample_strip.reshape(-1, 1, 3), cv2.COLOR_BGR2LAB)
+    border_color = np.median(lab_strip.reshape(-1, 3), axis=0)
+
+    # ボーダー内の色バラつきをΔEで計測してベースラインとする
+    # ホログラムカードは同色でもΔE 15-20程度のシマーがある
+    baseline_lab = lab_strip.reshape(-1, 3)
+    baseline_deltas = np.sqrt(np.sum((baseline_lab - border_color) ** 2, axis=1))
+    baseline_de = float(np.mean(baseline_deltas))
+
+    # 閾値: ボーダーベースラインの4倍 (最低25) 以上の色変化を境界とする
+    # sample_from=0（ワープ済み画像）はサンプルが均一すぎてthreshold=25が低すぎるため40に上げる
+    min_threshold = 40.0 if sample_from == 0 else 25.0
+    threshold = max(min_threshold, baseline_de * 4.0)
+    CONSECUTIVE = 2
+
+    def _delta_e(pixels: np.ndarray) -> float:
+        lab = cv2.cvtColor(pixels.reshape(-1, 1, 3), cv2.COLOR_BGR2LAB).reshape(-1, 3)
+        return float(np.mean(np.sqrt(np.sum((lab - border_color) ** 2, axis=1))))
+
+    # 内側に走査
+    if direction == "left":
+        mid = slice(h // 4, 3 * h // 4)
+        consecutive = 0
+        for x in range(min_search, max_search):
+            if _delta_e(roi[mid, x]) > threshold:
+                consecutive += 1
+                if consecutive >= CONSECUTIVE:
+                    return x - CONSECUTIVE + 1
+            else:
+                consecutive = 0
+        return min_search
+
+    elif direction == "right":
+        mid = slice(h // 4, 3 * h // 4)
+        consecutive = 0
+        for x in range(w - min_search - 1, w - max_search - 1, -1):
+            if _delta_e(roi[mid, x]) > threshold:
+                consecutive += 1
+                if consecutive >= CONSECUTIVE:
+                    return w - (x + CONSECUTIVE - 1) - 1
+            else:
+                consecutive = 0
+        return min_search
+
+    elif direction == "top":
+        mid = slice(w // 4, 3 * w // 4)
+        consecutive = 0
+        for y in range(min_search, max_search):
+            if _delta_e(roi[y, mid]) > threshold:
+                consecutive += 1
+                if consecutive >= CONSECUTIVE:
+                    return y - CONSECUTIVE + 1
+            else:
+                consecutive = 0
+        return min_search
+
+    else:  # bottom
+        mid = slice(w // 4, 3 * w // 4)
+        consecutive = 0
+        for y in range(h - min_search - 1, h - max_search - 1, -1):
+            if _delta_e(roi[y, mid]) > threshold:
+                consecutive += 1
+                if consecutive >= CONSECUTIVE:
+                    return h - (y + CONSECUTIVE - 1) - 1
+            else:
+                consecutive = 0
+        return min_search
 
 
 def _find_border_hough(edges: np.ndarray, direction: str,

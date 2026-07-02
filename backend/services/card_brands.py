@@ -179,13 +179,17 @@ def get_centering_mode(brand_id: str, rarity_id: str) -> str:
     """カードタイプに応じたセンタリング分析モードを返す。
 
     Returns:
-        "bordered"  - 標準ボーダー検出（外枠 vs 内枠）
-        "borderless" - ボーダーレス/フルアート（カード外縁の対称性のみ）
-        "gold_border" - 金ボーダー検出（ポケカURなど）
-        "thin_border" - 薄ボーダー検出（ワンピSECなど）
+        "bordered"     - 標準ボーダー検出（ポケモンの白ボーダーなど）
+        "borderless"   - ボーダーレス/フルアート
+        "gold_border"  - 金ボーダー検出（ポケカURなど）
+        "thin_border"  - 薄ボーダー検出
+        "color_border" - 色付きボーダー検出（ONE PIECE等の白以外のボーダー）
     """
     rarity = get_rarity(brand_id, rarity_id)
     if not rarity:
+        # ブランド未指定・レアリティ未指定でも ONE PIECEなら color_border
+        if brand_id == "onepiece":
+            return "color_border"
         return "bordered"
 
     if not rarity.has_border or rarity.border_type == "none":
@@ -193,8 +197,11 @@ def get_centering_mode(brand_id: str, rarity_id: str) -> str:
     elif rarity.border_type == "gold":
         return "gold_border"
     elif rarity.border_type in ("thin", "silver"):
-        return "thin_border"
+        return "color_border"  # 薄い or 銀ボーダーも色付きボーダー検出で扱う
     else:
+        # ONE PIECE の標準ボーダーは白ではなく色付き → color_border
+        if brand_id == "onepiece":
+            return "color_border"
         return "bordered"
 
 
