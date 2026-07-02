@@ -157,11 +157,11 @@ async def delete_grading_images(grading_id: str) -> None:
     if not images:
         return
 
-    # ファイルパスのリストを作成
-    paths = [img["storage_path"].split(f"/{STORAGE_BUCKET}/")[-1] for img in images]
-
     async with httpx.AsyncClient() as client:
-        await client.delete(
+        # httpx の client.delete() はリクエストボディ (json=) を受け付けないため
+        # client.request("DELETE", ...) を使う
+        await client.request(
+            "DELETE",
             f"{SUPABASE_URL}/storage/v1/object/{STORAGE_BUCKET}",
             headers=_headers(),
             json={"prefixes": [f"{grading_id}/"]},
