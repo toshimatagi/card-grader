@@ -1,8 +1,10 @@
 """鑑定APIルーター（Supabase永続化対応）"""
 
+import asyncio
 import cv2
 import base64
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from typing import Optional
 
 from ..services.grading import grade_card
@@ -69,7 +71,10 @@ async def create_grade(
             pass
 
     try:
-        result = grade_card(
+        # grade_card は CPU 処理 + Gemini リトライ待機を含む同期関数。
+        # イベントループを塞がないよう threadpool で実行する。
+        result = await run_in_threadpool(
+            grade_card,
             image_bytes,
             card_type=card_type,
             brand=brand,
@@ -84,46 +89,54 @@ async def create_grade(
         raise HTTPException(500, f"鑑定処理中にエラーが発生しました: {str(e)}")
 
     # --- Supabase に保存 ---
+    # アップロードに成功した画像は、レスポンスの base64 を Storage URL に
+    # 差し替えて返す（レスポンスサイズ削減）。失敗した画像は base64 のまま
+    # 返すので、フロントはどちらでも表示できる。
     try:
         # 1. 鑑定結果をDBに保存
         await insert_grading(result)
 
-        # 2. 画像をStorageにアップロード
         grading_id = result["id"]
+        back_analysis = result.get("back_analysis") or {}
 
-        # 元画像（アップロードされたもの）
-        original_url = await upload_image(image_bytes, grading_id, "original")
-        await save_grading_image(grading_id, "original", original_url)
-
-        # 正面化されたカード画像
-        card_jpg = base64.b64decode(result["card_image"])
-        card_url = await upload_image(card_jpg, grading_id, "card")
-        await save_grading_image(grading_id, "card", card_url)
-
-        # オーバーレイ画像
+        # 2. アップロード対象を集めて並列アップロード
+        uploads: list[tuple[str, bytes]] = [
+            ("original", image_bytes),
+            ("card", base64.b64decode(result["card_image"])),
+        ]
         for overlay_key, overlay_b64 in result.get("overlay_images", {}).items():
             if overlay_b64:
-                overlay_jpg = base64.b64decode(overlay_b64)
-                overlay_url = await upload_image(overlay_jpg, grading_id, overlay_key)
-                await save_grading_image(grading_id, overlay_key, overlay_url)
-
-        # 裏面画像
-        back_analysis = result.get("back_analysis") or {}
+                uploads.append((overlay_key, base64.b64decode(overlay_b64)))
         if back_image_bytes and back_analysis and not back_analysis.get("error"):
-            back_original_url = await upload_image(back_image_bytes, grading_id, "back_original")
-            await save_grading_image(grading_id, "back_original", back_original_url)
+            uploads.append(("back_original", back_image_bytes))
+            if back_analysis.get("card_image"):
+                uploads.append(("back_card", base64.b64decode(back_analysis["card_image"])))
+            if back_analysis.get("centering_overlay"):
+                uploads.append(("back_centering", base64.b64decode(back_analysis["centering_overlay"])))
 
-            back_card_b64 = back_analysis.get("card_image")
-            if back_card_b64:
-                back_card_jpg = base64.b64decode(back_card_b64)
-                back_card_url = await upload_image(back_card_jpg, grading_id, "back_card")
-                await save_grading_image(grading_id, "back_card", back_card_url)
+        async def _upload_one(image_type: str, data: bytes) -> tuple[str, Optional[str]]:
+            try:
+                url = await upload_image(data, grading_id, image_type)
+                await save_grading_image(grading_id, image_type, url)
+                return image_type, url
+            except Exception as e:
+                print(f"[WARN] 画像アップロード失敗 ({image_type}): {e}")
+                return image_type, None
 
-            back_overlay_b64 = back_analysis.get("centering_overlay")
-            if back_overlay_b64:
-                back_overlay_jpg = base64.b64decode(back_overlay_b64)
-                back_overlay_url = await upload_image(back_overlay_jpg, grading_id, "back_centering")
-                await save_grading_image(grading_id, "back_centering", back_overlay_url)
+        uploaded = await asyncio.gather(*(_upload_one(t, d) for t, d in uploads))
+        urls = {t: u for t, u in uploaded if u}
+
+        # 3. 成功分は base64 → URL に差し替え
+        if urls.get("card"):
+            result["card_image"] = urls["card"]
+        for overlay_key in list(result.get("overlay_images", {}).keys()):
+            if urls.get(overlay_key):
+                result["overlay_images"][overlay_key] = urls[overlay_key]
+        if back_analysis:
+            if urls.get("back_card"):
+                back_analysis["card_image"] = urls["back_card"]
+            if urls.get("back_centering"):
+                back_analysis["centering_overlay"] = urls["back_centering"]
 
     except Exception as e:
         # DB保存失敗してもレスポンスは返す（鑑定結果は取得済み）

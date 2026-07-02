@@ -6,6 +6,11 @@ import ScoreGauge from "./ScoreGauge";
 import CardPriceSummary from "../cards/CardPriceSummary";
 import CenteringEditor, { CenteringResult } from "../centering/CenteringEditor";
 
+/** API は画像を Storage URL または base64 のどちらでも返すので両対応にする */
+function imageSrc(img: string): string {
+  return img.startsWith("http") ? img : `data:image/jpeg;base64,${img}`;
+}
+
 interface Props {
   result: GradeResult;
   cardName?: string;
@@ -266,11 +271,11 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
         <div className="flex justify-center">
           <div className="relative inline-block">
             <img
-              src={`data:image/jpeg;base64,${
+              src={imageSrc(
                 activeOverlay && activeOverlay !== "__adjusted__" && result.overlay_images[activeOverlay]
                   ? result.overlay_images[activeOverlay]
                   : result.card_image
-              }`}
+              )}
               alt={activeOverlay ? `${activeOverlay} overlay` : "カード画像"}
               className="max-h-[500px] rounded-lg shadow-md block"
             />
@@ -423,7 +428,7 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
             {editingCentering && (
               <div className="mt-4 border-t pt-4">
                 <CenteringEditor
-                  imageSrc={`data:image/jpeg;base64,${result.card_image}`}
+                  imageSrc={imageSrc(result.card_image)}
                   onComplete={(r) => {
                     setAdjustedCentering(r);
                     setEditingCentering(false);
@@ -602,9 +607,7 @@ function BackAnalysisSection({
         </div>
         <div className="flex justify-center">
           <img
-            src={`data:image/jpeg;base64,${
-              showOverlay ? back.centering_overlay : back.card_image
-            }`}
+            src={imageSrc(showOverlay ? back.centering_overlay : back.card_image)}
             alt={showOverlay ? "裏面センタリング解析" : "裏面"}
             className="max-h-[400px] rounded-lg shadow"
           />

@@ -21,10 +21,14 @@ def analyze_surface(card_image: np.ndarray, is_holo: bool = False) -> dict:
     # ホロカードはパターンノイズが多いので閾値を緩める
     sens = 1.5 if is_holo else 1.0
 
-    scratches = _detect_scratches(gray, sens)
-    whitening = _detect_whitening(card_image, gray, sens)
-    creases = _detect_creases(gray, sens)
-    corner_damage = _detect_corner_damage(gray, sens)
+    # 解像度スケール: 面積閾値・カーネルは長辺800px時代にチューニングされた値なので、
+    # 高解像度入力でも同じ感度になるよう正規化する（長辺800pxなら res=1.0）
+    res = max(h, w) / 800.0
+
+    scratches = _detect_scratches(gray, sens, res)
+    whitening = _detect_whitening(card_image, gray, sens)  # 比率ベースで解像度非依存
+    creases = _detect_creases(gray, sens, res)
+    corner_damage = _detect_corner_damage(gray, sens)      # 比率・輝度ベースで解像度非依存
     defects = scratches + whitening + creases + corner_damage
 
     score = _calculate_score(defects)
@@ -52,13 +56,14 @@ def analyze_surface(card_image: np.ndarray, is_holo: bool = False) -> dict:
     }
 
 
-def _detect_scratches(gray: np.ndarray, sens: float = 1.0) -> list:
-    """線状の傷（スクラッチ）を検出。sens > 1 で許容を緩める。"""
+def _detect_scratches(gray: np.ndarray, sens: float = 1.0, res: float = 1.0) -> list:
+    """線状の傷（スクラッチ）を検出。sens > 1 で許容を緩める。res は解像度スケール。"""
     h, w = gray.shape
     defects = []
 
     # ガウシアンブラーでノイズ除去
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    blur_k = _odd_kernel(5 * res)
+    blurred = cv2.GaussianBlur(gray, (blur_k, blur_k), 0)
     diff = cv2.absdiff(gray, blurred)
 
     # 閾値処理 (sens で緩めると印刷パターンを拾わない)
@@ -68,9 +73,10 @@ def _detect_scratches(gray: np.ndarray, sens: float = 1.0) -> list:
     kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_open)
 
+    line_k = max(15, int(round(15 * res)))
     kernels = [
-        cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1)),
-        cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15)),
+        cv2.getStructuringElement(cv2.MORPH_RECT, (line_k, 1)),
+        cv2.getStructuringElement(cv2.MORPH_RECT, (1, line_k)),
     ]
     scratch_mask = np.zeros_like(gray)
     for kernel in kernels:
@@ -79,10 +85,12 @@ def _detect_scratches(gray: np.ndarray, sens: float = 1.0) -> list:
 
     contours, _ = cv2.findContours(scratch_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    min_area = int(60 * sens)        # 元: 20 → 大幅に緩和
-    main_min_area = int(120 * sens)  # 元: 30
-    minor_thresh = int(400 * sens)   # 元: 200
-    major_thresh = int(1500 * sens)  # 元: 1000 (critical 境界)
+    # 面積閾値は解像度の2乗でスケール
+    area_scale = res * res
+    min_area = int(60 * sens * area_scale)        # 元: 20 → 大幅に緩和
+    main_min_area = int(120 * sens * area_scale)  # 元: 30
+    minor_thresh = int(400 * sens * area_scale)   # 元: 200
+    major_thresh = int(1500 * sens * area_scale)  # 元: 1000 (critical 境界)
 
     for contour in contours:
         area = cv2.contourArea(contour)
@@ -139,8 +147,8 @@ def _detect_whitening(color_image: np.ndarray, gray: np.ndarray, sens: float = 1
     return defects
 
 
-def _detect_creases(gray: np.ndarray, sens: float = 1.0) -> list:
-    """折れ・クリースを検出"""
+def _detect_creases(gray: np.ndarray, sens: float = 1.0, res: float = 1.0) -> list:
+    """折れ・クリースを検出。res は解像度スケール。"""
     h, w = gray.shape
     defects = []
 
@@ -154,10 +162,11 @@ def _detect_creases(gray: np.ndarray, sens: float = 1.0) -> list:
     )
 
     # minLineLength を 15% → 25% (短い線をクリースと誤認しない)
+    # Hough の投票数・ギャップは px 単位なので解像度でスケール
     lines = cv2.HoughLinesP(
-        strong_edges, 1, np.pi/180, threshold=80,
+        strong_edges, 1, np.pi/180, threshold=max(1, int(80 * res)),
         minLineLength=int(min(h, w) * 0.25),
-        maxLineGap=10,
+        maxLineGap=max(1, int(10 * res)),
     )
 
     if lines is not None:
@@ -214,6 +223,12 @@ def _detect_corner_damage(gray: np.ndarray, sens: float = 1.0) -> list:
             })
 
     return defects
+
+
+def _odd_kernel(size: float, minimum: int = 3) -> int:
+    """カーネルサイズを奇数に丸める（OpenCV のカーネルは奇数必須）"""
+    k = max(minimum, int(round(size)))
+    return k if k % 2 == 1 else k + 1
 
 
 def _location_label(x: int, y: int, w: int, h: int) -> str:

@@ -109,6 +109,8 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
                 card_data = retry
                 card_image = retry["card_image"]
 
+    # 表面傷は数pxの信号なので、傷検出用に縮小前の画像を保持（長辺1200px上限のまま）
+    card_image_hires = card_image
     # カード画像も処理用にリサイズ（長辺800px上限）
     card_image = _resize_if_needed(card_image, max_side=800)
     card_data["card_image"] = card_image
@@ -162,7 +164,7 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     # color を先に走らせて is_holo を取得し、surface/edges に渡してホロ用に閾値を緩める
     color_result = analyze_color(card_image)
     is_holo = bool(color_result.get("detail", {}).get("is_holo"))
-    surface_result = analyze_surface(card_image, is_holo=is_holo)
+    surface_result = analyze_surface(card_image_hires, is_holo=is_holo)
 
     # 手動センタリングで outer_corners が指定されていれば、edges.py に渡して
     # 実カード実角を corner region として分析させる (斜め撮影対応)
