@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 interface Lines { left: number; right: number; top: number; bottom: number; }
 
-interface CenteringResult {
+export interface CenteringResult {
   lr_ratio: string;
   tb_ratio: string;
   left_border: number;
@@ -54,6 +54,10 @@ interface Props {
   fullartMode?: boolean;
   cardKind?: "character" | "leader";
   initialOuter?: Lines | null;
+  /** Pre-load inner frame from AI border pixel values */
+  initialBorders?: { left: number; right: number; top: number; bottom: number };
+  submitLabel?: string;
+  skipLabel?: string;
 }
 
 export default function CenteringEditor({
@@ -61,6 +65,9 @@ export default function CenteringEditor({
   onComplete,
   onSkip,
   fullartMode = false,
+  initialBorders,
+  submitLabel = "この測定で鑑定開始",
+  skipLabel = "スキップ (AIチェック)",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef   = useRef<HTMLDivElement>(null);
@@ -83,6 +90,21 @@ export default function CenteringEditor({
     setImageSize({ w: img.naturalWidth, h: img.naturalHeight });
     setImageLoaded(true);
   }, []);
+
+  // Initialize inner lines from AI border pixel values once image dimensions are known
+  useEffect(() => {
+    if (!imageLoaded || !initialBorders) return;
+    const { w, h } = imageSize;
+    if (w <= 0 || h <= 0) return;
+    setInner({
+      left:   initialBorders.left / w,
+      right:  1 - initialBorders.right / w,
+      top:    initialBorders.top / h,
+      bottom: 1 - initialBorders.bottom / h,
+    });
+  // Only run when image first loads — initialBorders is intentionally not in deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageLoaded]);
 
   useEffect(() => {
     if (!imageLoaded || !containerRef.current) return;
@@ -396,14 +418,14 @@ export default function CenteringEditor({
           onClick={onSkip}
           className="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium"
         >
-          スキップ (AIチェック)
+          {skipLabel}
         </button>
         <button
           onClick={() => result && onComplete(result)}
           disabled={!result}
           className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium disabled:bg-gray-400"
         >
-          この測定で鑑定開始
+          {submitLabel}
         </button>
       </div>
     </div>

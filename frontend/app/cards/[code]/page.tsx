@@ -268,6 +268,7 @@ export default async function CardDetailPage({
     "@context": "https://schema.org",
     "@type": "Product",
     name: `${data.cards[0].name_ja} (${data.code})`,
+    description: `${data.cards[0].name_ja}（${data.code}）の買取・販売相場。${meta.en}・${data.cards[0].set_code}弾。`,
     sku: data.code,
     image: data.cards.map((c) => c.image_url).filter(Boolean),
     brand: { "@type": "Brand", name: meta.en },
@@ -280,6 +281,38 @@ export default async function CardDetailPage({
         availability: "https://schema.org/InStock",
         itemCondition: "https://schema.org/NewCondition",
         name: `${VARIANT_LABEL[c.variant] ?? c.variant} ${c.rarity}`,
+        shippingDetails: {
+          "@type": "OfferShippingDetails",
+          shippingRate: {
+            "@type": "MonetaryAmount",
+            value: "0",
+            currency: "JPY",
+          },
+          shippingDestination: {
+            "@type": "DefinedRegion",
+            addressCountry: "JP",
+          },
+          deliveryTime: {
+            "@type": "ShippingDeliveryTime",
+            handlingTime: {
+              "@type": "QuantitativeValue",
+              minValue: 1,
+              maxValue: 3,
+              unitCode: "DAY",
+            },
+            transitTime: {
+              "@type": "QuantitativeValue",
+              minValue: 1,
+              maxValue: 5,
+              unitCode: "DAY",
+            },
+          },
+        },
+        hasMerchantReturnPolicy: {
+          "@type": "MerchantReturnPolicy",
+          applicableCountry: "JP",
+          returnPolicyCategory: "https://schema.org/MerchantReturnNotPermitted",
+        },
       })),
   };
 

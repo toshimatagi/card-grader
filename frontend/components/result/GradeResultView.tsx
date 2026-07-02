@@ -4,6 +4,7 @@ import { useState } from "react";
 import { GradeResult } from "../../lib/api";
 import ScoreGauge from "./ScoreGauge";
 import CardPriceSummary from "../cards/CardPriceSummary";
+import CenteringEditor, { CenteringResult } from "../centering/CenteringEditor";
 
 interface Props {
   result: GradeResult;
@@ -50,6 +51,8 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
   const [copied, setCopied] = useState(false);
   const [showCrosshair, setShowCrosshair] = useState(false);
   const [showThirds, setShowThirds] = useState(false);
+  const [editingCentering, setEditingCentering] = useState(false);
+  const [adjustedCentering, setAdjustedCentering] = useState<CenteringResult | null>(null);
 
   const shareUrl =
     shareUrlProp ||
@@ -218,6 +221,18 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
               {OVERLAY_LABELS[key] || key}
             </button>
           ))}
+          {adjustedCentering && (
+            <button
+              onClick={() => setActiveOverlay("__adjusted__")}
+              className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                activeOverlay === "__adjusted__"
+                  ? "bg-green-600 text-white"
+                  : "bg-green-100 text-green-800 hover:bg-green-200"
+              }`}
+            >
+              🎯 手動調整
+            </button>
+          )}
         </div>
 
         {/* ガイドラインのトグル */}
@@ -252,13 +267,38 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
           <div className="relative inline-block">
             <img
               src={`data:image/jpeg;base64,${
-                activeOverlay && result.overlay_images[activeOverlay]
+                activeOverlay && activeOverlay !== "__adjusted__" && result.overlay_images[activeOverlay]
                   ? result.overlay_images[activeOverlay]
                   : result.card_image
               }`}
               alt={activeOverlay ? `${activeOverlay} overlay` : "カード画像"}
               className="max-h-[500px] rounded-lg shadow-md block"
             />
+            {/* 手動調整センタリング枠 */}
+            {activeOverlay === "__adjusted__" && adjustedCentering?.inner_corners && adjustedCentering.source_width && adjustedCentering.source_height && (() => {
+              const { tl, tr, bl } = adjustedCentering.inner_corners!;
+              const sw = adjustedCentering.source_width!;
+              const sh = adjustedCentering.source_height!;
+              const l = tl[0] / sw * 100;
+              const r = tr[0] / sw * 100;
+              const t = tl[1] / sh * 100;
+              const b = bl[1] / sh * 100;
+              return (
+                <svg
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  className="absolute inset-0 w-full h-full pointer-events-none rounded-lg"
+                >
+                  <rect
+                    x={l} y={t} width={r - l} height={b - t}
+                    fill="none"
+                    stroke="#22C55E"
+                    strokeWidth="0.6"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              );
+            })()}
             {(showCrosshair || showThirds) && (
               <svg
                 viewBox="0 0 100 100"
@@ -310,32 +350,97 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
             icon="🎯"
             score={result.sub_grades.centering.score}
           >
+            {adjustedCentering && (
+              <div className="flex items-center justify-between mb-3 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                <span className="text-xs text-green-800 font-medium">✅ 手動調整値を表示中</span>
+                <button
+                  onClick={() => { setAdjustedCentering(null); if (activeOverlay === "__adjusted__") setActiveOverlay(null); }}
+                  className="text-xs text-green-700 underline hover:text-green-900"
+                >
+                  AI値に戻す
+                </button>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <DataItem
                 label="左右比率"
-                value={String(result.sub_grades.centering.detail.lr_ratio)}
+                value={adjustedCentering ? adjustedCentering.lr_ratio : String(result.sub_grades.centering.detail.lr_ratio)}
               />
               <DataItem
                 label="上下比率"
-                value={String(result.sub_grades.centering.detail.tb_ratio)}
+                value={adjustedCentering ? adjustedCentering.tb_ratio : String(result.sub_grades.centering.detail.tb_ratio)}
               />
               <DataItem
                 label="左ボーダー"
-                value={`${result.sub_grades.centering.detail.left_border}px`}
+                value={`${adjustedCentering ? adjustedCentering.left_border : result.sub_grades.centering.detail.left_border}px`}
               />
               <DataItem
                 label="右ボーダー"
-                value={`${result.sub_grades.centering.detail.right_border}px`}
+                value={`${adjustedCentering ? adjustedCentering.right_border : result.sub_grades.centering.detail.right_border}px`}
               />
               <DataItem
                 label="上ボーダー"
-                value={`${result.sub_grades.centering.detail.top_border}px`}
+                value={`${adjustedCentering ? adjustedCentering.top_border : result.sub_grades.centering.detail.top_border}px`}
               />
               <DataItem
                 label="下ボーダー"
-                value={`${result.sub_grades.centering.detail.bottom_border}px`}
+                value={`${adjustedCentering ? adjustedCentering.bottom_border : result.sub_grades.centering.detail.bottom_border}px`}
               />
             </div>
+
+            {/* 手動調整グレード判定 */}
+            {adjustedCentering && (
+              <div className="mt-3">
+                <div className="text-xs font-medium text-gray-500 mb-1.5">調整後の鑑定機関別判定</div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {adjustedCentering.grades.map((g) => (
+                    <div
+                      key={g.name}
+                      className={`text-center py-1 px-1 rounded text-xs font-medium ${
+                        g.pass
+                          ? "bg-green-50 text-green-700 border border-green-200"
+                          : "bg-red-50 text-red-400 border border-red-100 line-through"
+                      }`}
+                    >
+                      {g.name}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* センタリング手動調整ボタン */}
+            {!editingCentering && (
+              <button
+                onClick={() => { setEditingCentering(true); setActiveOverlay(null); }}
+                className="mt-3 w-full py-2 rounded-lg border border-green-300 text-green-700 bg-green-50 hover:bg-green-100 text-sm font-medium transition-colors"
+              >
+                🎯 センタリングを手動調整
+              </button>
+            )}
+
+            {/* インラインCenteringEditor */}
+            {editingCentering && (
+              <div className="mt-4 border-t pt-4">
+                <CenteringEditor
+                  imageSrc={`data:image/jpeg;base64,${result.card_image}`}
+                  onComplete={(r) => {
+                    setAdjustedCentering(r);
+                    setEditingCentering(false);
+                    setActiveOverlay("__adjusted__");
+                  }}
+                  onSkip={() => setEditingCentering(false)}
+                  initialBorders={{
+                    left:   Number(result.sub_grades.centering.detail.left_border)   || 0,
+                    right:  Number(result.sub_grades.centering.detail.right_border)  || 0,
+                    top:    Number(result.sub_grades.centering.detail.top_border)    || 0,
+                    bottom: Number(result.sub_grades.centering.detail.bottom_border) || 0,
+                  }}
+                  submitLabel="この位置で確定"
+                  skipLabel="キャンセル"
+                />
+              </div>
+            )}
           </DetailSection>
 
           {/* 表面状態詳細 */}
