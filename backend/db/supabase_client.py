@@ -167,3 +167,49 @@ async def delete_grading_images(grading_id: str) -> None:
             json={"prefixes": [f"{grading_id}/"]},
             timeout=15,
         )
+
+
+# ---------------------------------------------------------------------------
+# AI センタリングキャッシュ（同期・ベストエフォート）
+# ---------------------------------------------------------------------------
+# grade_card() は同期関数（threadpool 上で実行）なので、ここだけ httpx.Client を使う。
+# 照合/保存に失敗しても鑑定は止めない（キャッシュはあくまで再現性・費用対策）。
+
+def get_centering_cache(phash_hex: str) -> dict | None:
+    """pHash に対応する AI センタリング測定結果を取得。ヒットしなければ None。"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    try:
+        with httpx.Client() as client:
+            res = client.get(
+                f"{SUPABASE_URL}/rest/v1/ai_centering_cache"
+                f"?phash=eq.{phash_hex}&select=result",
+                headers=_headers(),
+                timeout=5,
+            )
+            res.raise_for_status()
+            rows = res.json()
+            return rows[0]["result"] if rows else None
+    except Exception as e:  # noqa: BLE001 — キャッシュは素通し
+        print(f"[cache] lookup failed (ignored): {e}")
+        return None
+
+
+def save_centering_cache(phash_hex: str, result: dict, model: str = "") -> None:
+    """AI センタリング測定結果を pHash キーで upsert。失敗は無視。"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return
+    try:
+        payload = {"phash": phash_hex, "result": result, "model": model}
+        headers = _headers()
+        headers["Prefer"] = "resolution=merge-duplicates"
+        with httpx.Client() as client:
+            res = client.post(
+                f"{SUPABASE_URL}/rest/v1/ai_centering_cache",
+                headers=headers,
+                json=payload,
+                timeout=5,
+            )
+            res.raise_for_status()
+    except Exception as e:  # noqa: BLE001 — キャッシュは素通し
+        print(f"[cache] save failed (ignored): {e}")

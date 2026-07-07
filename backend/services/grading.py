@@ -446,8 +446,28 @@ def _analyze_centering_with_ai(card_image, centering_mode, border_ratios, cw, ch
     _, buf = cv2.imencode(".jpg", card_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
     img_bytes = buf.tobytes()
 
-    ai = analyze_centering_ai_2call(img_bytes)
-    print(f"[centering] Gemini 2call result={ai}")
+    # pHash キャッシュ照合（再現性確保・費用/503リスク削減、ベストエフォート）
+    phash_hex = None
+    try:
+        from .phash import compute_phash
+        phash_hex = compute_phash(card_image).hex()
+    except Exception as e:  # noqa: BLE001 — 失敗時はキャッシュ無効で素通し
+        print(f"[centering] phash 計算失敗（キャッシュ無効化）: {e}")
+
+    ai = None
+    if phash_hex:
+        from ..db.supabase_client import get_centering_cache
+        cached = get_centering_cache(phash_hex)
+        if cached:
+            print(f"[centering] cache hit phash={phash_hex}")
+            ai = cached
+
+    if ai is None:
+        ai = analyze_centering_ai_2call(img_bytes)
+        print(f"[centering] Gemini 2call result={ai}")
+        if ai and phash_hex:
+            from ..db.supabase_client import save_centering_cache
+            save_centering_cache(phash_hex, ai, model="gemini_ai_2call")
 
     if ai and ai["confidence"] >= 0.5:
         from .centering import _calculate_score, _generate_overlay, _detect_outer_boundary

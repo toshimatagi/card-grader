@@ -18,7 +18,9 @@
 
 ---
 
-## P1-1: pHash キャッシュ（AI測定の再現性確保）【最優先】
+## [x] P1-1: pHash キャッシュ（AI測定の再現性確保）【最優先】
+
+**完了（2026-07-07）**: テーブル `ai_centering_cache`（`backend/db/migrations/015_ai_centering_cache.sql`、番号は既存連番に合わせ 015）を Supabase に作成。`db/supabase_client.py` に同期ベストエフォートの `get_centering_cache` / `save_centering_cache` を追加し、`grading.py` の `_analyze_centering_with_ai()` で pHash 照合を組み込み。ローカル検証で同一画像 2 回鑑定 → 2 回目が `[centering] cache hit` を出し Gemini を呼ばず同一値（centering 8.5 / borders 24,19,25,36）を返すことを確認。
 
 **背景**: Gemini 測定は非決定的で、同じ画像の再鑑定でスコアが変わる。手動補正後の再実行が典型で、そのたびに Gemini 2 コールの費用と 503 リスクも発生。
 
