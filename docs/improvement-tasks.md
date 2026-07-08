@@ -33,7 +33,9 @@
 **検証**: ローカルで uvicorn を起動し同じ画像を 2 回 POST。応答の `sub_grades.centering` が完全一致すること
 **規模**: 小〜中（半日）
 
-## P1-2: 測定モードのバッジ表示
+## [x] P1-2: 測定モードのバッジ表示
+
+**完了（2026-07-08）**: `GradeResultView.tsx` に `centeringModeBadge()` を追加し、センタリング詳細の先頭に 🤖 AI測定 / 📐 自動測定 / ✋ 手動測定 のバッジを表示。手動調整中（`adjustedCentering`）と `detail.mode==="manual"` は手動、`gemini_ai_2call` は AI、未設定は自動。共有ビュー（`grade/[id]`）・アップロード結果（`GradeApp`）とも同コンポーネント経由で表示。`npx tsc --noEmit` パス。
 
 **背景**: 結果が AI 測定か OpenCV 自動か手動かで信頼性が違うのに、UI で区別できない。`sub_grades.centering.detail.mode` に `gemini_ai_2call` / `manual` 等が既に入っている（OpenCV フォールバック時は mode 未設定 = None なので「自動測定」として扱う）。
 

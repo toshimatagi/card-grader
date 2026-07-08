@@ -37,6 +37,24 @@ function ratioColor(ratio: string): string {
   return "text-red-600";
 }
 
+/**
+ * センタリング測定モードのバッジ。
+ * detail.mode: "gemini_ai_2call"=AI / "manual"=手動 / 未設定(None)=OpenCV自動。
+ * 手動調整中（クライアント側の adjustedCentering）は手動扱いにする。
+ */
+function centeringModeBadge(
+  mode: unknown,
+  manuallyAdjusted: boolean
+): { icon: string; label: string; className: string } {
+  if (manuallyAdjusted || mode === "manual") {
+    return { icon: "✋", label: "手動測定", className: "bg-amber-50 text-amber-700 border-amber-200" };
+  }
+  if (mode === "gemini_ai_2call") {
+    return { icon: "🤖", label: "AI測定", className: "bg-indigo-50 text-indigo-700 border-indigo-200" };
+  }
+  return { icon: "📐", label: "自動測定", className: "bg-gray-100 text-gray-600 border-gray-200" };
+}
+
 const SUB_GRADE_LABELS: Record<string, { label: string; icon: string }> = {
   centering: { label: "センタリング", icon: "🎯" },
   surface: { label: "表面状態", icon: "🔍" },
@@ -355,6 +373,23 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
             icon="🎯"
             score={result.sub_grades.centering.score}
           >
+            {(() => {
+              const badge = centeringModeBadge(
+                result.sub_grades.centering.detail.mode,
+                !!adjustedCentering
+              );
+              return (
+                <div className="mb-3">
+                  <span
+                    className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border ${badge.className}`}
+                    title="この数値の測定方法"
+                  >
+                    <span>{badge.icon}</span>
+                    {badge.label}
+                  </span>
+                </div>
+              );
+            })()}
             {adjustedCentering && (
               <div className="flex items-center justify-between mb-3 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                 <span className="text-xs text-green-800 font-medium">✅ 手動調整値を表示中</span>
