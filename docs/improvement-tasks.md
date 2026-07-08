@@ -43,7 +43,9 @@
 **完了条件**: 3 モードそれぞれでバッジが正しく出る。`npx tsc --noEmit` パス
 **規模**: 小（1時間）
 
-## P1-3: ゴールデン回帰テスト + CI
+## [x] P1-3: ゴールデン回帰テスト + CI
+
+**完了（2026-07-09）**: `backend/tests/test_golden.py` を新設（`GEMINI_API_KEY=""` で OpenCV 決定的経路のみ検証、10ケース）。IMG_2958/IMG_2853 の overall・4サブスコアを ±0.5、surface defects 件数レンジ、is_holo、センタリング border px（±5、比率フォールバック検知）を assert。実測ゴールデン値は doc の想定と一致。`backend/requirements-dev.txt` に pytest を分離、`.github/workflows/test.yml` で backend 変更時に pytest 実行。テスト画像は git tracked 済みで CI でも動く。ローカル 10 passed。
 
 **背景**: 鑑定ロジックの閾値変更が過去のカードで劣化していないかを検証する仕組みがない。すべて手動確認。
 
