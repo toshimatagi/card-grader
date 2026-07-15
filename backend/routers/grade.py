@@ -5,6 +5,7 @@ import cv2
 import base64
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 from typing import Optional
 
 from ..services.grading import grade_card
@@ -16,11 +17,28 @@ from ..db.supabase_client import (
     get_grading,
     list_gradings,
     delete_grading,
+    update_grading_centering,
     upload_image,
     save_grading_image,
     get_grading_images,
     delete_grading_images,
 )
+
+
+class ManualCenteringPayload(BaseModel):
+    """結果画面の手動センタリング確定値（フロントの CenteringResult 相当）。"""
+    lr_ratio: str
+    tb_ratio: str
+    left_border: float
+    right_border: float
+    top_border: float
+    bottom_border: float
+    inner_corners: Optional[dict] = None
+    outer_corners: Optional[dict] = None
+    source_width: Optional[int] = None
+    source_height: Optional[int] = None
+    grades: Optional[list] = None
+    score: Optional[float] = None
 
 router = APIRouter(prefix="/api/v1", tags=["grading"])
 
@@ -165,6 +183,26 @@ async def get_grade(grade_id: str):
         },
         "original_image_url": image_map.get("original"),
     }
+
+
+@router.patch("/grade/{grade_id}/centering")
+async def update_grade_centering(grade_id: str, payload: ManualCenteringPayload):
+    """結果画面の手動センタリング確定値を永続化する。
+
+    sub_grades.centering.detail.manual_adjusted に保存し、リロード後も
+    調整値を復元できるようにする。同時に AI 測定値との系統誤差分析
+    （backend/db/migrations/016_centering_manual_diff.sql の集計ビュー）の
+    教師データになる。
+    """
+    try:
+        stored = await update_grading_centering(
+            grade_id, payload.model_dump(exclude_none=True)
+        )
+    except Exception as e:
+        raise HTTPException(500, f"手動調整値の保存に失敗しました: {str(e)}")
+    if stored is None:
+        raise HTTPException(404, "鑑定結果が見つかりません")
+    return {"message": "保存しました", "manual_adjusted": stored}
 
 
 @router.get("/history")

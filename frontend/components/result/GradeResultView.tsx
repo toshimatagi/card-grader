@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GradeResult } from "../../lib/api";
+import { GradeResult, saveManualCentering } from "../../lib/api";
 import ScoreGauge from "./ScoreGauge";
 import CardPriceSummary from "../cards/CardPriceSummary";
 import CenteringEditor, { CenteringResult } from "../centering/CenteringEditor";
@@ -75,7 +75,12 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
   const [showCrosshair, setShowCrosshair] = useState(false);
   const [showThirds, setShowThirds] = useState(false);
   const [editingCentering, setEditingCentering] = useState(false);
-  const [adjustedCentering, setAdjustedCentering] = useState<CenteringResult | null>(null);
+  // 過去に保存した手動調整値があれば復元（リロード後も表示される / P1-5）
+  const [adjustedCentering, setAdjustedCentering] = useState<CenteringResult | null>(
+    () =>
+      (result.sub_grades.centering.detail.manual_adjusted as CenteringResult | undefined) ??
+      null
+  );
 
   const shareUrl =
     shareUrlProp ||
@@ -468,6 +473,12 @@ export default function GradeResultView({ result, cardName, brand, shareUrl: sha
                     setAdjustedCentering(r);
                     setEditingCentering(false);
                     setActiveOverlay("__adjusted__");
+                    // 手動確定値を永続化（リロード後の復元 + AI差分分析の教師データ / P1-5）
+                    if (result.id) {
+                      saveManualCentering(result.id, r).catch((e) =>
+                        console.error("手動調整値の保存に失敗:", e)
+                      );
+                    }
                   }}
                   onSkip={() => setEditingCentering(false)}
                   initialBorders={{

@@ -158,6 +158,36 @@ export async function gradeCard(
   return res.json();
 }
 
+/** 手動センタリング確定値（CenteringEditor の CenteringResult を永続化した形）。 */
+export interface ManualCentering {
+  lr_ratio: string;
+  tb_ratio: string;
+  left_border: number;
+  right_border: number;
+  top_border: number;
+  bottom_border: number;
+  inner_corners?: Record<string, [number, number]>;
+  outer_corners?: Record<string, [number, number]>;
+  source_width?: number;
+  source_height?: number;
+  grades?: Array<{ name: string; pass: boolean }>;
+  score?: number;
+  saved_at?: string;
+}
+
+/** 結果画面の手動センタリング調整値をサーバに保存する（リロード後も復元される）。 */
+export async function saveManualCentering(
+  gradeId: string,
+  adjusted: ManualCentering,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/v1/grade/${gradeId}/centering`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(adjusted),
+  });
+  if (!res.ok) throw new Error("手動調整値の保存に失敗しました");
+}
+
 export async function getGrade(id: string): Promise<GradeResult> {
   const res = await fetch(`${API_BASE}/api/v1/grade/${id}`);
   if (!res.ok) throw new Error("鑑定結果の取得に失敗しました");

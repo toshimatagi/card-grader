@@ -3,6 +3,7 @@
 import os
 import uuid
 import httpx
+from datetime import datetime, timezone
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -86,6 +87,45 @@ async def list_gradings(limit: int = 20, offset: int = 0) -> dict:
             total = int(total_str) if total_str != "*" else len(res.json())
 
         return {"total": total, "items": res.json()}
+
+
+async def update_grading_centering(grading_id: str, manual_adjusted: dict) -> dict | None:
+    """結果画面の手動センタリング確定値を gradings.sub_grades.centering.detail.manual_adjusted に保存。
+
+    read-modify-write で既存 sub_grades にマージする（jsonb 全体を差し替え）。
+    保存した値（saved_at 付き）を返す。対象が無ければ None。
+    手動確定値は AI 測定との系統誤差を測る教師データなので、キャッシュと違い
+    失敗は握りつぶさず呼び出し側で扱えるよう例外を伝播させる。
+    """
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            f"{SUPABASE_URL}/rest/v1/gradings?id=eq.{grading_id}&select=sub_grades",
+            headers=_headers(),
+            timeout=10,
+        )
+        res.raise_for_status()
+        rows = res.json()
+        if not rows:
+            return None
+
+        sub_grades = rows[0].get("sub_grades") or {}
+        centering = sub_grades.get("centering") or {}
+        detail = centering.get("detail") or {}
+
+        stored = dict(manual_adjusted)
+        stored["saved_at"] = datetime.now(timezone.utc).isoformat()
+        detail["manual_adjusted"] = stored
+        centering["detail"] = detail
+        sub_grades["centering"] = centering
+
+        patch = await client.patch(
+            f"{SUPABASE_URL}/rest/v1/gradings?id=eq.{grading_id}",
+            headers=_headers(),
+            json={"sub_grades": sub_grades},
+            timeout=10,
+        )
+        patch.raise_for_status()
+        return stored
 
 
 async def delete_grading(grading_id: str) -> bool:

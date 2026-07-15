@@ -75,7 +75,9 @@ grade_card 自体は同期のままでよい（既に threadpool 上で動いて
 **検証**: ログにフェーズ別時間を出して before/after を比較
 **規模**: 小〜中（半日）
 
-## P1-5: 手動確定値の永続化と AI 差分ログ
+## [x] P1-5: 手動確定値の永続化と AI 差分ログ
+
+**完了（2026-07-15）**: `PATCH /api/v1/grade/{id}/centering`（`routers/grade.py`、`ManualCenteringPayload` で入力を whitelist）を新設。`db/supabase_client.py` に `update_grading_centering()` を追加し、`gradings.sub_grades.centering.detail.manual_adjusted` へ read-modify-write でマージ保存（`saved_at` 付与、AI 元値の `detail` は非破壊）。フロントは `lib/api.ts` の `saveManualCentering()` を `GradeResultView` の `onComplete` から呼び、初期表示は `detail.manual_adjusted` から復元（リロード後も調整値が出る）。集計は `backend/db/migrations/016_centering_manual_diff.sql` にビュー2本（`ai_vs_manual_centering_diff` 明細＝辺ごと diff、`ai_vs_manual_centering_summary` モード別平均・標準偏差）。**このビューは未適用**（Supabase SQL Editor で貼り付け実行が必要。永続化機能自体はビュー無しで動作）。検証: 本番 Supabase にテスト行を作り保存→取得で `manual_adjusted`/`saved_at` と AI 元値の両立を確認、404 パス（未存在ID→None）も確認し行を削除。`npx tsc --noEmit` パス、ゴールデン10件グリーン維持。
 
 **背景**: 結果画面の手動センタリング調整（`GradeResultView.tsx` の `adjustedCentering`）は**クライアント状態のみで保存されない**。手動確定値は AI の系統誤差を測る唯一の教師データなのに捨てている。
 
