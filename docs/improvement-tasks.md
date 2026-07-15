@@ -61,7 +61,9 @@
 **完了条件**: ローカルと GitHub Actions の両方で pytest がグリーン
 **規模**: 中（半日）
 
-## P1-4: サブ分析の並列化
+## [x] P1-4: サブ分析の並列化
+
+**完了（2026-07-15）**: `grading.py` の `grade_card()` で分析を2系統に分割し、`_run_centering()`（系統A）と `_run_color_surface_edges()`（系統B: color→surface→edges、is_holo依存を系統内で解決）をクロージャ化。AI 経路のみ `ThreadPoolExecutor(max_workers=2)` で A/B を並列実行し、手動経路（AI 非呼び出し）は逐次のまま。各フェーズに `[timing]` ログを追加。OpenCV 経路の実測で系統B（0.20s）が系統A（0.34s）の裏に隠れ合計 0.34s に短縮（従来は和で 0.54s 相当）。実 Gemini 経路では系統B が Gemini 応答時間の裏に完全に隠れる。ゴールデンテスト10件グリーン維持（overall 8.0 / centering 10.0 で不変）。
 
 **背景**: centering(AI) → color → surface → edges が直列。Gemini 往復（数秒〜数十秒）の間 CPU が遊んでいる。
 

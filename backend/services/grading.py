@@ -2,6 +2,8 @@
 
 import uuid
 import base64
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import cv2
@@ -126,63 +128,98 @@ def grade_card(image_bytes: bytes, card_type: str = "standard",
     border_ratios = get_border_ratios(brand) if brand else None
 
     # 2. 各分析を実行
-    if manual_centering and "lr_ratio" in manual_centering:
-        centering_result = _build_manual_centering_result(manual_centering, card_image)
-        # フルアート系のランドマーク補正 (任意)
-        landmarks = manual_centering.get("landmarks")
-        outer_corners_for_landmark = manual_centering.get("outer_corners")
-        if landmarks and outer_corners_for_landmark and brand:
-            from .card_layouts import compute_design_alignment, get_template_for
-            template = get_template_for(brand, rarity)
-            # ランドマーク座標を card_image スケールに合わせる
+    # 依存関係が独立した 2 系統に分けて並列実行する:
+    #   系統A: センタリング (AI 経路は Gemini 往復で数秒待つ)
+    #   系統B: color → surface + edges (surface/edges は color の is_holo に依存)
+    # AI 経路のときだけ ThreadPoolExecutor で A/B を重ねる。手動経路は AI を
+    # 呼ばず即時なので逐次のまま (並列化しても得がない)。
+
+    def _run_centering():
+        t0 = time.perf_counter()
+        if manual_centering and "lr_ratio" in manual_centering:
+            result = _build_manual_centering_result(manual_centering, card_image)
+            # フルアート系のランドマーク補正 (任意)
+            landmarks = manual_centering.get("landmarks")
+            outer_corners_for_landmark = manual_centering.get("outer_corners")
+            if landmarks and outer_corners_for_landmark and brand:
+                from .card_layouts import compute_design_alignment, get_template_for
+                template = get_template_for(brand, rarity)
+                # ランドマーク座標を card_image スケールに合わせる
+                src_w = manual_centering.get("source_width") or card_image.shape[1]
+                src_h = manual_centering.get("source_height") or card_image.shape[0]
+                sx = card_image.shape[1] / max(src_w, 1)
+                sy = card_image.shape[0] / max(src_h, 1)
+                scaled_landmarks = {
+                    k: [v[0] * sx, v[1] * sy] for k, v in landmarks.items() if v
+                }
+                scaled_outer = {
+                    k: [v[0] * sx, v[1] * sy] for k, v in outer_corners_for_landmark.items()
+                }
+                design_score, design_detail = compute_design_alignment(
+                    scaled_landmarks, scaled_outer, template
+                )
+                if design_detail.get("marked", 0) > 0:
+                    # margin_balance 60% + design_alignment 40%
+                    margin_score = result["score"]
+                    combined = round((0.6 * margin_score + 0.4 * design_score) * 2) / 2
+                    result["score"] = combined
+                    result["detail"]["margin_score"] = margin_score
+                    result["detail"]["design_score"] = design_score
+                    result["detail"]["design_alignment"] = design_detail
+        else:
+            ch2, cw2 = card_image.shape[:2]
+            result = _analyze_centering_with_ai(
+                card_image, centering_mode, border_ratios, cw2, ch2, brand=brand
+            )
+        print(f"[timing] centering {time.perf_counter() - t0:.2f}s")
+        return result
+
+    def _run_color_surface_edges():
+        t0 = time.perf_counter()
+        # color を先に走らせて is_holo を取得し、surface/edges に渡してホロ用に閾値を緩める
+        color_result = analyze_color(card_image)
+        is_holo = bool(color_result.get("detail", {}).get("is_holo"))
+        t_color = time.perf_counter()
+        surface_result = analyze_surface(card_image_hires, is_holo=is_holo)
+        t_surface = time.perf_counter()
+
+        # 手動センタリングで outer_corners が指定されていれば、edges.py に渡して
+        # 実カード実角を corner region として分析させる (斜め撮影対応)
+        edges_outer_corners = None
+        if manual_centering and "outer_corners" in manual_centering:
+            oc = manual_centering["outer_corners"]
+            # フロントは元画像座標で送ってくるので、card_image にスケール
             src_w = manual_centering.get("source_width") or card_image.shape[1]
             src_h = manual_centering.get("source_height") or card_image.shape[0]
             sx = card_image.shape[1] / max(src_w, 1)
             sy = card_image.shape[0] / max(src_h, 1)
-            scaled_landmarks = {
-                k: [v[0] * sx, v[1] * sy] for k, v in landmarks.items() if v
-            }
-            scaled_outer = {
-                k: [v[0] * sx, v[1] * sy] for k, v in outer_corners_for_landmark.items()
-            }
-            design_score, design_detail = compute_design_alignment(
-                scaled_landmarks, scaled_outer, template
-            )
-            if design_detail.get("marked", 0) > 0:
-                # margin_balance 60% + design_alignment 40%
-                margin_score = centering_result["score"]
-                combined = round((0.6 * margin_score + 0.4 * design_score) * 2) / 2
-                centering_result["score"] = combined
-                centering_result["detail"]["margin_score"] = margin_score
-                centering_result["detail"]["design_score"] = design_score
-                centering_result["detail"]["design_alignment"] = design_detail
-    else:
-        ch, cw = card_image.shape[:2]
-        centering_result = _analyze_centering_with_ai(
-            card_image, centering_mode, border_ratios, cw, ch, brand=brand
+            try:
+                edges_outer_corners = {
+                    k: [int(oc[k][0] * sx), int(oc[k][1] * sy)] for k in ("tl", "tr", "bl", "br")
+                }
+            except (KeyError, TypeError, IndexError):
+                edges_outer_corners = None
+        edges_result = analyze_edges(card_image, is_holo=is_holo, outer_corners=edges_outer_corners)
+        t_edges = time.perf_counter()
+        print(
+            f"[timing] color {t_color - t0:.2f}s surface {t_surface - t_color:.2f}s "
+            f"edges {t_edges - t_surface:.2f}s"
         )
-    # color を先に走らせて is_holo を取得し、surface/edges に渡してホロ用に閾値を緩める
-    color_result = analyze_color(card_image)
-    is_holo = bool(color_result.get("detail", {}).get("is_holo"))
-    surface_result = analyze_surface(card_image_hires, is_holo=is_holo)
+        return color_result, surface_result, edges_result
 
-    # 手動センタリングで outer_corners が指定されていれば、edges.py に渡して
-    # 実カード実角を corner region として分析させる (斜め撮影対応)
-    edges_outer_corners = None
-    if manual_centering and "outer_corners" in manual_centering:
-        oc = manual_centering["outer_corners"]
-        # フロントは元画像座標で送ってくるので、card_image にスケール
-        src_w = manual_centering.get("source_width") or card_image.shape[1]
-        src_h = manual_centering.get("source_height") or card_image.shape[0]
-        sx = card_image.shape[1] / max(src_w, 1)
-        sy = card_image.shape[0] / max(src_h, 1)
-        try:
-            edges_outer_corners = {
-                k: [int(oc[k][0] * sx), int(oc[k][1] * sy)] for k in ("tl", "tr", "bl", "br")
-            }
-        except (KeyError, TypeError, IndexError):
-            edges_outer_corners = None
-    edges_result = analyze_edges(card_image, is_holo=is_holo, outer_corners=edges_outer_corners)
+    is_manual = bool(manual_centering and "lr_ratio" in manual_centering)
+    if is_manual:
+        # AI を呼ばないので並列化不要。逐次実行
+        centering_result = _run_centering()
+        color_result, surface_result, edges_result = _run_color_surface_edges()
+    else:
+        t_parallel = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            f_center = ex.submit(_run_centering)
+            f_cse = ex.submit(_run_color_surface_edges)
+            centering_result = f_center.result()
+            color_result, surface_result, edges_result = f_cse.result()
+        print(f"[timing] analysis (parallel) total {time.perf_counter() - t_parallel:.2f}s")
 
     # 3. 総合スコア算出
     sub_scores = {
